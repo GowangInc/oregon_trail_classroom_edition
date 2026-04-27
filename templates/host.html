@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oregon Trail: Classroom Edition - Host</title>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="host-theme">
+    <div class="crt-overlay">
+        <div class="scanlines"></div>
+    </div>
+
+    <div id="app">
+        <!-- SCREEN: Host Setup -->
+        <section id="screen-host-setup" class="screen active">
+            <div class="screen-content">
+                <pre class="ascii-art">
+  _    _           _     _
+ | |  | |         | |   | |
+ | |__| | ___  ___| |__ | |
+ |  __  |/ _ \/ __| '_ \| |
+ | |  | | (_) \__ \ | | |_|
+ |_|  |_|\___/|___/_| |_(_)
+                </pre>
+                <p class="subtitle">HOST DASHBOARD</p>
+                <div style="margin-bottom: 1rem;">
+                    <input type="password" id="host-password" class="terminal-input" placeholder="Enter Host Password" style="width: 250px;">
+                </div>
+                <button id="btn-create-session" class="terminal-btn">LOGIN AS HOST</button>
+                <p id="setup-info" class="status-msg"></p>
+            </div>
+        </section>
+
+        <!-- SCREEN: Lobby Management -->
+        <section id="screen-host-lobby" class="screen" hidden>
+            <div class="screen-content" style="justify-content: flex-start; padding-top: 2rem;">
+                <h1>SESSION: <span id="host-session-code" class="highlight">---</span></h1>
+                <p class="status-msg">Share this code with students to join.</p>
+
+                <div style="display: flex; gap: 1rem; width: 100%; max-width: 900px; flex-wrap: wrap;">
+                    <!-- Players Pool -->
+                    <div class="lobby-panel" style="flex: 1; min-width: 250px;">
+                        <h3>UNASSIGNED PLAYERS</h3>
+                        <ul id="host-unassigned" class="member-list"></ul>
+                    </div>
+
+                    <!-- Parties -->
+                    <div class="lobby-panel" style="flex: 2; min-width: 300px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <h3 style="margin: 0;">PARTIES</h3>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <button id="btn-add-party" class="terminal-btn" style="min-width: auto; font-size: 0.9rem; padding: 0.3rem 0.6rem;">+ PARTY</button>
+                                <button id="btn-shuffle" class="terminal-btn" style="min-width: auto; font-size: 0.9rem; padding: 0.3rem 0.6rem;">SHUFFLE</button>
+                            </div>
+                        </div>
+                        <div id="host-parties"></div>
+                    </div>
+                </div>
+
+                <button id="btn-start-game" class="terminal-btn" style="margin-top: 1rem;">START GAME</button>
+            </div>
+        </section>
+
+        <!-- SCREEN: Host Dashboard -->
+        <section id="screen-host-dash" class="screen" hidden>
+            <div style="padding: 0.5rem; height: 100vh; display: flex; flex-direction: column; gap: 0.5rem;">
+                <!-- Top Controls -->
+                <header class="status-bar" style="border-color: #66ccff;">
+                    <div class="stat-group">
+                        <span class="stat">SESSION: <span id="dash-session-code" class="highlight">---</span></span>
+                        <span class="stat">DATE: <span id="dash-date" class="highlight">---</span></span>
+                        <span class="stat">WEATHER: <span id="dash-weather" class="highlight">---</span></span>
+                        <span class="stat">STATUS: <span id="dash-status" class="highlight">---</span></span>
+                    </div>
+                    <div class="stat-group">
+                        <span class="stat">TICK: <span id="dash-tick">0</span></span>
+                    </div>
+                </header>
+
+                <!-- Control Bar -->
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; padding: 0.3rem;">
+                    <button id="btn-save" class="terminal-btn" style="min-width: auto; font-size: 0.9rem; color: #4af626; border-color: #4af626;">SAVE GAME</button>
+                    <button id="btn-load" class="terminal-btn" style="min-width: auto; font-size: 0.9rem; color: #ffeb3b; border-color: #ffeb3b;">LOAD GAME</button>
+                    <button id="btn-pause" class="terminal-btn" style="min-width: auto; font-size: 0.9rem;">PAUSE</button>
+                    <button id="btn-resume" class="terminal-btn" style="min-width: auto; font-size: 0.9rem;">RESUME</button>
+                    <button id="btn-advance-1" class="terminal-btn" style="min-width: auto; font-size: 0.9rem;">+1 DAY</button>
+                    <button id="btn-advance-7" class="terminal-btn" style="min-width: auto; font-size: 0.9rem;">+7 DAYS</button>
+                    <div style="display: flex; align-items: center; gap: 0.3rem;">
+                        <label style="font-size: 0.9rem;">AUTO:</label>
+                        <input type="checkbox" id="chk-auto" style="accent-color: #66ccff;">
+                        <input type="range" id="rng-interval" min="5" max="60" value="15" style="width: 100px;">
+                        <span id="lbl-interval" style="font-size: 0.9rem;">15s</span>
+                    </div>
+                    <button id="btn-end-game" class="terminal-btn" style="min-width: auto; font-size: 0.9rem; color: #ff4444; border-color: #ff4444;">END GAME</button>
+                </div>
+
+                <!-- Main Dashboard -->
+                <div style="display: flex; flex: 1; gap: 0.5rem; min-height: 0;">
+                    <!-- Party Cards -->
+                    <div class="viewport" id="dash-parties" style="flex: 2;">
+                        <h3>ALL PARTIES</h3>
+                        <div id="party-cards"></div>
+                    </div>
+
+                    <!-- Tools Panel -->
+                    <div class="sidebar" style="width: 300px;">
+                        <div class="panel">
+                            <h3>EVENT INJECTION</h3>
+                            <select id="sel-party-inject" class="terminal-input" style="width: 100%; margin-bottom: 0.5rem;">
+                                <option value="">Select party...</option>
+                            </select>
+                            <div id="event-buttons" style="display: flex; flex-direction: column; gap: 0.3rem;">
+                                <!-- Event buttons injected by JS -->
+                            </div>
+                        </div>
+
+                        <div class="panel">
+                            <h3>PARTY EDITOR</h3>
+                            <select id="sel-party-edit" class="terminal-input" style="width: 100%; margin-bottom: 0.5rem;">
+                                <option value="">Select party...</option>
+                            </select>
+                            <div id="edit-fields" style="display: flex; flex-direction: column; gap: 0.3rem;">
+                                <!-- Edit fields injected by JS -->
+                            </div>
+                        </div>
+
+                        <div class="panel">
+                            <h3>GLOBAL LOG</h3>
+                            <div id="host-log" style="font-size: 0.9rem; max-height: 200px; overflow-y: auto;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div id="aria-live" aria-live="polite" aria-atomic="false" class="sr-only"></div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script type="module" src="/static/js/host.js"></script>
+</body>
+</html>

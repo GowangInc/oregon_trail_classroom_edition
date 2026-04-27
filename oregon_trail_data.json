@@ -1,0 +1,498 @@
+{
+  "landmarks": [
+    {
+      "name": "Independence, Missouri",
+      "type": "start",
+      "miles_from_start": 0,
+      "miles_to_next": 100
+    },
+    {
+      "name": "Kansas River Crossing",
+      "type": "river",
+      "miles_from_start": 100,
+      "miles_to_next": 80
+    },
+    {
+      "name": "Big Blue River Crossing",
+      "type": "river",
+      "miles_from_start": 180,
+      "miles_to_next": 120
+    },
+    {
+      "name": "Fort Kearney",
+      "type": "fort",
+      "miles_from_start": 300,
+      "miles_to_next": 271
+    },
+    {
+      "name": "Chimney Rock",
+      "type": "landmark",
+      "miles_from_start": 571,
+      "miles_to_next": 96
+    },
+    {
+      "name": "Fort Laramie",
+      "type": "fort",
+      "miles_from_start": 667,
+      "miles_to_next": 171
+    },
+    {
+      "name": "Independence Rock",
+      "type": "landmark",
+      "miles_from_start": 838,
+      "miles_to_next": 109
+    },
+    {
+      "name": "South Pass",
+      "type": "landmark_branch",
+      "miles_from_start": 947,
+      "miles_to_next": 0,
+      "branches": [
+        {
+          "name": "Fort Bridger",
+          "miles": 123
+        },
+        {
+          "name": "Green River Crossing",
+          "miles": 67
+        }
+      ]
+    },
+    {
+      "name": "Fort Bridger",
+      "type": "fort",
+      "miles_from_start": 1070,
+      "miles_to_next": 136
+    },
+    {
+      "name": "Green River Crossing",
+      "type": "river",
+      "miles_from_start": 1014,
+      "miles_to_next": 192
+    },
+    {
+      "name": "Soda Springs",
+      "type": "landmark",
+      "miles_from_start": 1206,
+      "miles_to_next": 82
+    },
+    {
+      "name": "Fort Hall",
+      "type": "fort_branch",
+      "miles_from_start": 1288,
+      "miles_to_next": 212
+    },
+    {
+      "name": "Snake River Crossing",
+      "type": "river",
+      "miles_from_start": 1500,
+      "miles_to_next": 85
+    },
+    {
+      "name": "Fort Boise",
+      "type": "fort",
+      "miles_from_start": 1585,
+      "miles_to_next": 151
+    },
+    {
+      "name": "Blue Mountains",
+      "type": "landmark",
+      "miles_from_start": 1736,
+      "miles_to_next": 64
+    },
+    {
+      "name": "Fort Walla Walla",
+      "type": "fort",
+      "miles_from_start": 1800,
+      "miles_to_next": 134
+    },
+    {
+      "name": "The Dalles",
+      "type": "landmark_endgame",
+      "miles_from_start": 1934,
+      "miles_to_next": 160
+    },
+    {
+      "name": "Willamette Valley / Oregon City",
+      "type": "end",
+      "miles_from_start": 2094,
+      "miles_to_next": 0
+    }
+  ],
+  "starting_prices": {
+    "oxen": {
+      "price_per_unit": 20,
+      "min_to_leave": 2,
+      "unit_name": "ox",
+      "yoke_size": 2,
+      "forced_purchase": true,
+      "max_ownable": 20
+    },
+    "food": {
+      "price_per_unit": 0.1,
+      "unit_name": "lb",
+      "max_wagon": 2000
+    },
+    "clothes": {
+      "price_per_unit": 10,
+      "unit_name": "set"
+    },
+    "ammunition": {
+      "price_per_unit": 0.1,
+      "box_size": 20,
+      "price_per_box": 2.0,
+      "unit_name": "bullet"
+    },
+    "wagon_wheel": {
+      "price_per_unit": 10,
+      "unit_name": "wheel",
+      "max_spares": 3
+    },
+    "wagon_axle": {
+      "price_per_unit": 10,
+      "unit_name": "axle",
+      "max_spares": 3
+    },
+    "wagon_tongue": {
+      "price_per_unit": 10,
+      "unit_name": "tongue",
+      "max_spares": 3
+    }
+  },
+  "professions": [
+    {
+      "name": "Banker",
+      "starting_cash": 1600,
+      "score_multiplier": 1
+    },
+    {
+      "name": "Carpenter",
+      "starting_cash": 800,
+      "score_multiplier": 2
+    },
+    {
+      "name": "Farmer",
+      "starting_cash": 400,
+      "score_multiplier": 3
+    }
+  ],
+  "pace": [
+    {
+      "name": "Steady",
+      "miles_per_day_min": 8,
+      "miles_per_day_max": 12,
+      "health_impact": "minimal",
+      "oxen_impact": "minimal"
+    },
+    {
+      "name": "Strenuous",
+      "miles_per_day_min": 12,
+      "miles_per_day_max": 18,
+      "health_impact": "moderate",
+      "oxen_impact": "moderate"
+    },
+    {
+      "name": "Grueling",
+      "miles_per_day_min": 18,
+      "miles_per_day_max": 25,
+      "health_impact": "severe",
+      "oxen_impact": "high"
+    }
+  ],
+  "rations": [
+    {
+      "name": "Filling",
+      "lbs_per_person_per_day": 3,
+      "health_impact": "improves"
+    },
+    {
+      "name": "Meager",
+      "lbs_per_person_per_day": 2,
+      "health_impact": "neutral"
+    },
+    {
+      "name": "Bare Bones",
+      "lbs_per_person_per_day": 1,
+      "health_impact": "decline"
+    }
+  ],
+  "animals": [
+    {
+      "name": "Squirrel",
+      "shots_to_kill": 1,
+      "attacks_player": false,
+      "food_yield_min": 2,
+      "food_yield_max": 5,
+      "habitat": "all"
+    },
+    {
+      "name": "Rabbit",
+      "shots_to_kill": 1,
+      "attacks_player": false,
+      "food_yield_min": 5,
+      "food_yield_max": 10,
+      "habitat": "all"
+    },
+    {
+      "name": "Deer",
+      "shots_to_kill": 1,
+      "attacks_player": false,
+      "food_yield_min": 50,
+      "food_yield_max": 80,
+      "habitat": "eastern_forests"
+    },
+    {
+      "name": "Elk",
+      "shots_to_kill": 1,
+      "attacks_player": false,
+      "food_yield_min": 80,
+      "food_yield_max": 100,
+      "habitat": "western_plains"
+    },
+    {
+      "name": "Bear",
+      "shots_to_kill": 2,
+      "attacks_player": false,
+      "food_yield_min": 100,
+      "food_yield_max": 100,
+      "habitat": "mountains"
+    },
+    {
+      "name": "Bison",
+      "shots_to_kill": 3,
+      "attacks_player": false,
+      "food_yield_min": 100,
+      "food_yield_max": 100,
+      "habitat": "great_plains"
+    }
+  ],
+  "hunting_carry_limit": 100,
+  "events": [
+    {
+      "id": "wheel_breaks",
+      "name": "Wagon wheel breaks",
+      "severity": "medium",
+      "effect": "lose_wheel"
+    },
+    {
+      "id": "axle_breaks",
+      "name": "Wagon axle breaks",
+      "severity": "medium",
+      "effect": "lose_axle"
+    },
+    {
+      "id": "tongue_breaks",
+      "name": "Wagon tongue breaks",
+      "severity": "medium",
+      "effect": "lose_tongue"
+    },
+    {
+      "id": "ox_dies",
+      "name": "Ox injured or dies",
+      "severity": "high",
+      "effect": "lose_ox"
+    },
+    {
+      "id": "thief",
+      "name": "Thief in the night",
+      "severity": "medium",
+      "effect": "lose_random_supplies"
+    },
+    {
+      "id": "fire",
+      "name": "Wagon fire",
+      "severity": "high",
+      "effect": "lose_random_supplies_heavy"
+    },
+    {
+      "id": "bad_water",
+      "name": "Bad water",
+      "severity": "medium",
+      "effect": "health_decline illness_chance"
+    },
+    {
+      "id": "no_water",
+      "name": "No water",
+      "severity": "medium",
+      "effect": "delay_1_day health_decline"
+    },
+    {
+      "id": "no_grass",
+      "name": "No grass for oxen",
+      "severity": "low",
+      "effect": "delay health_decline"
+    },
+    {
+      "id": "lost_trail",
+      "name": "Lost trail",
+      "severity": "medium",
+      "effect": "lose_1_to_3_days"
+    },
+    {
+      "id": "snake_bite",
+      "name": "Snake bite",
+      "severity": "high",
+      "effect": "member_injured"
+    },
+    {
+      "id": "illness",
+      "name": "Member illness",
+      "severity": "high",
+      "effect": "member_sick"
+    },
+    {
+      "id": "heavy_fog",
+      "name": "Heavy fog",
+      "severity": "low",
+      "effect": "lose_1_day"
+    },
+    {
+      "id": "wild_fruit",
+      "name": "Find wild fruit",
+      "severity": "bonus",
+      "effect": "gain_20_food"
+    },
+    {
+      "id": "abandoned_wagon",
+      "name": "Find abandoned wagon",
+      "severity": "bonus",
+      "effect": "gain_random_supplies"
+    },
+    {
+      "id": "indians_help",
+      "name": "Indians help find food",
+      "severity": "bonus",
+      "effect": "gain_30_food_only_when_low"
+    }
+  ],
+  "illnesses": [
+    {
+      "name": "Dysentery",
+      "cause": "bad_water low_rations",
+      "fatality": "very_high"
+    },
+    {
+      "name": "Cholera",
+      "cause": "bad_water",
+      "fatality": "very_high"
+    },
+    {
+      "name": "Measles",
+      "cause": "crowded contact",
+      "fatality": "moderate_high"
+    },
+    {
+      "name": "Typhoid",
+      "cause": "bad_water poor_sanitation",
+      "fatality": "high"
+    },
+    {
+      "name": "Exhaustion",
+      "cause": "grueling_pace no_rest low_food",
+      "fatality": "moderate"
+    },
+    {
+      "name": "Fever",
+      "cause": "infection weather",
+      "fatality": "moderate"
+    },
+    {
+      "name": "Snake bite",
+      "cause": "random_event",
+      "fatality": "moderate_high"
+    },
+    {
+      "name": "Broken arm/leg",
+      "cause": "random_accident",
+      "fatality": "moderate"
+    }
+  ],
+  "health_levels": [
+    {
+      "name": "Good",
+      "score_per_person": 500
+    },
+    {
+      "name": "Fair",
+      "score_per_person": 400
+    },
+    {
+      "name": "Poor",
+      "score_per_person": 300
+    },
+    {
+      "name": "Very Poor",
+      "score_per_person": 200
+    }
+  ],
+  "river_crossing": {
+    "methods": [
+      {
+        "name": "Ford",
+        "cost": 0,
+        "safe_depth_ft": 2.5,
+        "risk_above_3ft": "high"
+      },
+      {
+        "name": "Caulk",
+        "cost": 0,
+        "recommended_depth_ft": "2.5_to_4",
+        "risk": "moderate"
+      },
+      {
+        "name": "Ferry",
+        "cost_per_person_ox": "5_to_10",
+        "risk": "low"
+      },
+      {
+        "name": "Wait",
+        "cost_days": "1+",
+        "effect": "river_may_improve_or_worsen"
+      }
+    ],
+    "guide": {
+      "name": "Indian Guide",
+      "risk_reduction_percent": 80,
+      "available_at": "Snake River"
+    }
+  },
+  "scoring": {
+    "wagon": 50,
+    "per_ox": 4,
+    "per_spare_part": 2,
+    "per_clothes_set": 2,
+    "per_50_bullets": 1,
+    "per_25_lbs_food": 1,
+    "per_5_dollars": 1,
+    "person_good": 500,
+    "person_fair": 400,
+    "person_poor": 300,
+    "person_very_poor": 200
+  },
+  "starting_months": [
+    {
+      "month": "March",
+      "difficulty": "hard_early_storms"
+    },
+    {
+      "month": "April",
+      "difficulty": "moderate"
+    },
+    {
+      "month": "May",
+      "difficulty": "optimal"
+    },
+    {
+      "month": "June",
+      "difficulty": "good"
+    },
+    {
+      "month": "July",
+      "difficulty": "late_hot"
+    },
+    {
+      "month": "August",
+      "difficulty": "very_late"
+    }
+  ]
+}

@@ -1,0 +1,585 @@
+"""Session orchestrator — manages game state, auto-advance, and host commands."""
+
+from __future__ import annotations
+
+import threading
+from copy import deepcopy
+from datetime import date, timedelta
+from typing import Dict, List, Optional, Tuple, Any
+
+from game_data import (
+    MONTHLY_WEATHER_WEIGHTS,
+    DEFAULT_AUTO_ADVANCE_INTERVAL,
+    DEFAULT_DECISION_TIMEOUT_AUTO,
+    DEFAULT_DECISION_TIMEOUT_PAUSED,
+    TRAIL_EVENTS,
+    STORE_PRICES,
+    FORT_PRICE_MULTIPLIERS,
+    Weather,
+    Terrain,
+    Profession,
+    Pace,
+    Rations,
+    Landmark,
+    LANDMARKS,
+)
+from models import GameSession, Party, Player, Decision, Inventory, Tombstone, DecisionType
+from party_engine import PartyEngine
+
+
+class SessionManager:
+    """Thread-safe manager for a single game session."""
+
+    def __init__(self, host_player_id: str, host_name: str = "Host"):
+        self.lock = threading.RLock()
+        self.session = GameSession(host_player_id=host_player_id)
+        self.engines: Dict[str, PartyEngine] = {}
+        self._host_sid: Optional[str] = None
+
+        # Add host as a player
+        host = Player(
+            player_id=host_player_id,
+            name=host_name,
+            is_host=True,
+        )
+        self.session.players[host_player_id] = host
+
+    # ------------------------------------------------------------------
+    # Player & Party Management
+    # ------------------------------------------------------------------
+    def add_player(self, name: str, socket_id: str) -> Player:
+        """Add a new non-host player to the lobby."""
+        with self.lock:
+            player = Player(name=name, socket_id=socket_id)
+            self.session.players[player.player_id] = player
+            return player
+
+    def remove_player(self, player_id: str):
+        """Mark a player as disconnected (keep them for reconnection)."""
+        with self.lock:
+            if player_id in self.session.players:
+                self.session.players[player_id].socket_id = None
+
+    def reconnect_player(self, player_id: str, socket_id: str) -> Optional[Player]:
+        """Reconnect a previously connected player."""
+        with self.lock:
+            if player_id in self.session.players:
+                self.session.players[player_id].socket_id = socket_id
+                self.session.players[player_id].last_seen = __import__('datetime').datetime.now()
+                return self.session.players[player_id]
+            return None
+
+    def create_party(self, party_name: str) -> Party:
+        """Create a new empty party."""
+        with self.lock:
+            party = Party(party_name=party_name)
+            self.session.parties[party.party_id] = party
+            self.engines[party.party_id] = PartyEngine()
+            return party
+
+    def assign_player_to_party(self, player_id: str, party_id: str) -> bool:
+        """Assign a player to a party. Returns False if party is full."""
+        with self.lock:
+            if party_id not in self.session.parties:
+                return False
+            party = self.session.parties[party_id]
+            if len(party.member_ids) >= 4:
+                return False
+            if player_id not in self.session.players:
+                return False
+
+            # Remove from old party if any
+            old_party_id = self.session.players[player_id].party_id
+            if old_party_id and old_party_id in self.session.parties:
+                old_party = self.session.parties[old_party_id]
+                if player_id in old_party.member_ids:
+                    old_party.member_ids.remove(player_id)
+                if old_party.captain_id == player_id:
+                    old_party.captain_id = old_party.member_ids[0] if old_party.member_ids else ""
+
+            # Add to new party
+            party.member_ids.append(player_id)
+            self.session.players[player_id].party_id = party_id
+            if not party.captain_id:
+                party.captain_id = player_id
+            return True
+
+    def shuffle_parties(self) -> bool:
+        """Randomly assign all unassigned players to parties evenly."""
+        with self.lock:
+            import random
+            unassigned = [
+                pid for pid, p in self.session.players.items()
+                if not p.is_host and not p.party_id
+            ]
+            if not unassigned:
+                return False
+
+            # Create parties if needed (target ~4 per party)
+            needed_parties = max(1, (len(unassigned) + 3) // 4)
+            while len(self.session.parties) < needed_parties:
+                self.create_party(f"Wagon Party {len(self.session.parties) + 1}")
+
+            party_ids = list(self.session.parties.keys())
+            random.shuffle(unassigned)
+            for i, player_id in enumerate(unassigned):
+                self.assign_player_to_party(player_id, party_ids[i % len(party_ids)])
+            return True
+
+    def set_party_name(self, party_id: str, name: str) -> bool:
+        with self.lock:
+            if party_id in self.session.parties:
+                self.session.parties[party_id].party_name = name
+                return True
+            return False
+
+    # ------------------------------------------------------------------
+    # Game Lifecycle
+    # ------------------------------------------------------------------
+    def start_game(self, start_date: Optional[date] = None) -> bool:
+        """Move from lobby/outfitting to active. Auto-outfit parties if needed."""
+        with self.lock:
+            if self.session.game_status not in ("lobby", "outfitting"):
+                return False
+
+            if not self.session.parties:
+                return False
+
+            self.session.start_date = start_date or date(1848, 3, 1)
+            self.session.global_date = self.session.start_date
+            self.session.global_weather = self._compute_weather(self.session.global_date)
+            self.session.game_status = "active"
+
+            for party in self.session.parties.values():
+                if party.status == "outfitting":
+                    party.status = "traveling"
+                if not party.global_date:
+                    party.global_date = self.session.global_date
+
+                # Auto-outfit with recommended starting purchases if inventory is empty
+                total_items = (
+                    party.inventory.oxen + party.inventory.food +
+                    party.inventory.clothing + party.inventory.bullets +
+                    party.inventory.wagon_wheels + party.inventory.wagon_axles +
+                    party.inventory.wagon_tongues
+                )
+                if total_items == 0:
+                    engine = self.engines.get(party.party_id)
+                    if engine:
+                        purchases = {
+                            'oxen': 6,
+                            'food': 400,
+                            'clothing': 8,
+                            'bullets': 4,
+                            'wagon_wheel': 2,
+                            'wagon_axle': 2,
+                            'wagon_tongue': 2,
+                        }
+                        profession = party.profession or Profession.CARPENTER
+                        party, _ = engine.outfit_party(party, profession, purchases)
+                        self.session.parties[party.party_id] = party
+
+            return True
+
+    def end_game(self) -> bool:
+        with self.lock:
+            self.session.game_status = "ended"
+            self.session.auto_advance_enabled = False
+            return True
+
+    # ------------------------------------------------------------------
+    # Auto-Advance Controls
+    # ------------------------------------------------------------------
+    def pause(self) -> bool:
+        with self.lock:
+            if self.session.game_status == "active":
+                self.session.game_status = "paused"
+                return True
+            return False
+
+    def resume(self) -> bool:
+        with self.lock:
+            if self.session.game_status == "paused":
+                self.session.game_status = "active"
+                return True
+            return False
+
+    def set_auto_advance(self, enabled: bool, interval_seconds: int = DEFAULT_AUTO_ADVANCE_INTERVAL):
+        with self.lock:
+            self.session.auto_advance_enabled = enabled
+            self.session.auto_advance_interval = max(5, min(60, interval_seconds))
+
+    # ------------------------------------------------------------------
+    # Daily Tick
+    # ------------------------------------------------------------------
+    def tick(self) -> Dict[str, Any]:
+        """Advance one global day. Returns snapshot for broadcasting."""
+        with self.lock:
+            if self.session.game_status not in ("active",):
+                return {"session_state": self.get_host_state(), "events": []}
+
+            self.session.tick_count += 1
+
+            # 1. Resolve pending decisions with defaults
+            for party in self.session.parties.values():
+                if party.decision_pending and not party.decision_pending.resolved:
+                    timeout = (
+                        DEFAULT_DECISION_TIMEOUT_PAUSED
+                        if self.session.game_status == "paused"
+                        else party.decision_pending.timeout_seconds
+                    )
+                    # Check if decision has timed out
+                    from datetime import datetime
+                    elapsed = (datetime.now() - party.decision_pending.created_at).total_seconds()
+                    if elapsed >= timeout:
+                        winner = party.decision_pending.get_winner()
+                        engine = self.engines.get(party.party_id)
+                        if engine:
+                            players = self._get_party_players(party)
+                            party, players, _ = engine.apply_decision(party, players, winner)
+                            self._update_party_and_players(party, players)
+
+            # 2. Tick each active party
+            all_events = []
+            for party in self.session.parties.values():
+                if party.status in ("finished", "dead"):
+                    continue
+
+                engine = self.engines.get(party.party_id)
+                if not engine:
+                    continue
+
+                players = self._get_party_players(party)
+                party, players, events = engine.tick(
+                    party, players, self.session.global_date, self.session.global_weather
+                )
+                self._update_party_and_players(party, players)
+
+                for ev in events:
+                    ev["party_id"] = party.party_id
+                    ev["party_name"] = party.party_name
+                    all_events.append(ev)
+
+                    # Handle tombstones from deaths
+                    if ev["type"] == "death":
+                        tombstone = Tombstone(
+                            player_name=ev["player_name"],
+                            party_name=party.party_name,
+                            mile_marker=party.distance_traveled,
+                            cause=ev["cause"],
+                            date=self.session.global_date,
+                        )
+                        self.session.tombstones.append(tombstone)
+
+            # 3. Compute proximity
+            self._update_proximity()
+
+            # 4. Advance global date & weather
+            self.session.global_date += timedelta(days=1)
+            self.session.global_weather = self._compute_weather(self.session.global_date)
+
+            # 5. Check game end
+            active_parties = [
+                p for p in self.session.parties.values()
+                if p.status not in ("finished", "dead")
+            ]
+            if not active_parties:
+                self.session.game_status = "ended"
+                self.session.auto_advance_enabled = False
+
+            return {
+                "session_state": self.get_host_state(),
+                "events": all_events,
+            }
+
+    def advance_days(self, count: int) -> Dict[str, Any]:
+        """Manually advance multiple days. Returns final snapshot."""
+        with self.lock:
+            result = {}
+            for _ in range(count):
+                if self.session.game_status not in ("active",):
+                    break
+                result = self.tick()
+            return result
+
+    # ------------------------------------------------------------------
+    # Player Actions
+    # ------------------------------------------------------------------
+    def submit_vote(self, player_id: str, decision_id: str, choice: str) -> bool:
+        with self.lock:
+            player = self.session.players.get(player_id)
+            if not player or not player.party_id:
+                return False
+
+            party = self.session.parties.get(player.party_id)
+            if not party or not party.decision_pending:
+                return False
+
+            dec = party.decision_pending
+            if dec.decision_id != decision_id:
+                return False
+            if not player.is_alive:
+                return False
+            if choice not in dec.options:
+                return False
+
+            dec.votes[player_id] = choice
+            return True
+
+    def captain_override(self, player_id: str, decision_id: str, choice: str) -> bool:
+        with self.lock:
+            player = self.session.players.get(player_id)
+            if not player or not player.party_id:
+                return False
+
+            party = self.session.parties.get(player.party_id)
+            if not party or not party.decision_pending:
+                return False
+
+            if party.captain_id != player_id:
+                return False
+
+            dec = party.decision_pending
+            if dec.decision_id != decision_id:
+                return False
+            if choice not in dec.options:
+                return False
+
+            dec.captain_default = choice
+            return True
+
+    def resolve_hunt(self, party_id: str, shots_hit: int) -> Dict[str, Any]:
+        with self.lock:
+            party = self.session.parties.get(party_id)
+            if not party:
+                return {"success": False, "message": "Party not found"}
+
+            engine = self.engines.get(party_id)
+            if not engine:
+                return {"success": False, "message": "No engine"}
+
+            party, result = engine.resolve_hunt(party, shots_hit)
+            self.session.parties[party_id] = party
+            return result
+
+    def buy_item(self, party_id: str, item: str, quantity: int) -> Dict[str, Any]:
+        with self.lock:
+            party = self.session.parties.get(party_id)
+            if not party:
+                return {"success": False, "message": "Party not found"}
+
+            # Determine price multiplier based on nearest fort
+            multiplier = 1.0
+            for fort_name, mult in sorted(FORT_PRICE_MULTIPLIERS.items(), key=lambda x: x[1]):
+                fort_lm = next((lm for lm in LANDMARKS if lm.name == fort_name), None)
+                if fort_lm and abs(party.distance_traveled - fort_lm.miles_from_start) < 50:
+                    multiplier = mult
+                    break
+
+            engine = self.engines.get(party_id)
+            if not engine:
+                return {"success": False, "message": "No engine"}
+
+            party, result = engine.buy_item(party, item, quantity, price_multiplier=multiplier)
+            self.session.parties[party_id] = party
+            return result
+
+    def cross_river(self, party_id: str, method: str) -> Dict[str, Any]:
+        with self.lock:
+            party = self.session.parties.get(party_id)
+            if not party:
+                return {"success": False, "message": "Party not found"}
+
+            engine = self.engines.get(party_id)
+            if not engine:
+                return {"success": False, "message": "No engine"}
+
+            # Compute river depth based on weather
+            river_depth = self._compute_river_depth()
+            players = self._get_party_players(party)
+            party, players, result = engine.resolve_river_crossing(party, players, method, river_depth)
+            self._update_party_and_players(party, players)
+            return result
+
+    # ------------------------------------------------------------------
+    # Host Overrides
+    # ------------------------------------------------------------------
+    def host_override_decision(self, party_id: str, choice: str) -> bool:
+        with self.lock:
+            party = self.session.parties.get(party_id)
+            if not party or not party.decision_pending:
+                return False
+
+            engine = self.engines.get(party_id)
+            if not engine:
+                return False
+
+            players = self._get_party_players(party)
+            party, players, _ = engine.apply_decision(party, players, choice)
+            self._update_party_and_players(party, players)
+            return True
+
+    def host_edit_party(self, party_id: str, field: str, value: Any) -> bool:
+        with self.lock:
+            party = self.session.parties.get(party_id)
+            if not party:
+                return False
+
+            # Allow editing common fields
+            if field == "party_name":
+                party.party_name = str(value)
+            elif field == "distance_traveled":
+                party.distance_traveled = max(0, int(value))
+            elif field == "money":
+                party.inventory.money = float(value)
+            elif field == "food":
+                party.inventory.food = max(0, int(value))
+            elif field == "oxen":
+                party.inventory.oxen = max(0, int(value))
+            elif field == "clothing":
+                party.inventory.clothing = max(0, int(value))
+            elif field == "bullets":
+                party.inventory.bullets = max(0, int(value))
+            elif field == "wagon_wheels":
+                party.inventory.wagon_wheels = max(0, int(value))
+            elif field == "wagon_axles":
+                party.inventory.wagon_axles = max(0, int(value))
+            elif field == "wagon_tongues":
+                party.inventory.wagon_tongues = max(0, int(value))
+            elif field == "pace":
+                party.pace = Pace(value) if value in [p.value for p in Pace] else party.pace
+            elif field == "rations":
+                party.rations = Rations(value) if value in [r.value for r in Rations] else party.rations
+            elif field == "status":
+                party.status = str(value)
+            else:
+                return False
+            return True
+
+    def host_inject_event(self, party_id: str, event_id: str) -> Dict[str, Any]:
+        with self.lock:
+            party = self.session.parties.get(party_id)
+            if not party:
+                return {"success": False, "message": "Party not found"}
+
+            event_def = next((e for e in TRAIL_EVENTS if e.id == event_id), None)
+            if not event_def:
+                return {"success": False, "message": "Unknown event"}
+
+            engine = self.engines.get(party_id)
+            if not engine:
+                return {"success": False, "message": "No engine"}
+
+            players = self._get_party_players(party)
+            party, players, msg = engine._apply_trail_event(
+                party, players, {"id": event_id, "description": event_def.description, "requires_supplies": event_def.requires_supplies}
+            )
+            self._update_party_and_players(party, players)
+
+            return {"success": True, "message": msg}
+
+    def host_set_player_health(self, player_id: str, health_status: str) -> bool:
+        with self.lock:
+            from game_data import HealthStatus
+            player = self.session.players.get(player_id)
+            if not player:
+                return False
+            try:
+                player.health_status = HealthStatus(health_status)
+                if health_status == "Dead":
+                    player.is_alive = False
+                else:
+                    player.is_alive = True
+                return True
+            except ValueError:
+                return False
+
+    # ------------------------------------------------------------------
+    # State Access
+    # ------------------------------------------------------------------
+    def get_player_state(self, player_id: str) -> Dict[str, Any]:
+        """Get trimmed state for a specific player."""
+        with self.lock:
+            return self.session.to_dict(player_id=player_id)
+
+    def get_host_state(self) -> Dict[str, Any]:
+        """Get full state for host dashboard."""
+        with self.lock:
+            return self.session.get_host_dict()
+
+    def get_party_state(self, party_id: str) -> Optional[Dict[str, Any]]:
+        with self.lock:
+            party = self.session.parties.get(party_id)
+            return party.to_dict(include_private=True) if party else None
+
+    def load_from_dict(self, data: Dict[str, Any]) -> bool:
+        """Replace the current session state from a dictionary."""
+        with self.lock:
+            try:
+                from models import GameSession
+                self.session = GameSession.from_dict(data)
+                # Re-initialize engines for all restored parties
+                self.engines.clear()
+                for party_id in self.session.parties:
+                    self.engines[party_id] = PartyEngine()
+                return True
+            except Exception as e:
+                print(f"Error loading session: {e}")
+                return False
+
+    # ------------------------------------------------------------------
+    # Internal Helpers
+    # ------------------------------------------------------------------
+    def _get_party_players(self, party: Party) -> Dict[str, Player]:
+        """Get a dict of player objects for a party's members."""
+        return {
+            pid: self.session.players[pid]
+            for pid in party.member_ids
+            if pid in self.session.players
+        }
+
+    def _update_party_and_players(self, party: Party, players: Dict[str, Player]):
+        """Update session state with modified party and player objects."""
+        self.session.parties[party.party_id] = party
+        for pid, player in players.items():
+            if pid in self.session.players:
+                self.session.players[pid] = player
+
+    def _compute_weather(self, dt: date) -> Weather:
+        """Compute weather for a given date based on month."""
+        weights = MONTHLY_WEATHER_WEIGHTS.get(dt.month, [(Weather.COOL, 1)])
+        return self._weighted_choice(weights)
+
+    def _compute_river_depth(self) -> int:
+        """Compute river depth in feet based on current weather."""
+        import random
+        base = 2
+        if self.session.global_weather == Weather.RAIN:
+            base += random.randint(2, 6)
+        elif self.session.global_weather == Weather.SNOW:
+            base += random.randint(1, 3)
+        elif self.session.global_weather in (Weather.VERY_HOT, Weather.HOT):
+            base = max(1, base - 1)
+        return base + random.randint(0, 3)
+
+    def _weighted_choice(self, choices):
+        total = sum(w for _, w in choices)
+        r = __import__('random').randint(1, total)
+        for item, weight in choices:
+            r -= weight
+            if r <= 0:
+                return item
+        return choices[-1][0]
+
+    def _update_proximity(self):
+        """Compute neighbor relationships between all parties."""
+        party_list = list(self.session.parties.values())
+        for party in party_list:
+            party.neighbor_party_ids = []
+
+        for i, p1 in enumerate(party_list):
+            for p2 in party_list[i + 1:]:
+                distance = abs(p1.distance_traveled - p2.distance_traveled)
+                if distance <= 5:
+                    p1.neighbor_party_ids.append(p2.party_id)
+                    p2.neighbor_party_ids.append(p1.party_id)

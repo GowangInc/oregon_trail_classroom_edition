@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oregon Trail: Classroom Edition</title>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- CRT Overlays -->
+    <div class="crt-overlay">
+        <div class="scanlines"></div>
+        <div class="flicker-overlay"></div>
+    </div>
+
+    <!-- App Container -->
+    <div id="app" role="application" aria-label="Oregon Trail: Classroom Edition Game">
+
+        <!-- SCREEN: Join -->
+        <section id="screen-join" class="screen active">
+            <div class="screen-content">
+                <pre class="ascii-art">
+   ____  _                           _   _       _ _
+  / __ \| |                         | | (_)     | | |
+ | |  | | |__  _ __ ___   ___  _ __ | |_ _ _ __ | | |
+ | |  | | '_ \| '_ ` _ \ / _ \| '_ \| __| | '_ \| | |
+ | |__| | | | | | | | | | (_) | | | | |_| | | | |_| |
+  \____/|_| |_|_| |_| |_|\___/|_| |_|\__|_|_| |_(_|_)
+                </pre>
+                <p class="subtitle">MULTIPLYER EDITION</p>
+                <div class="input-group">
+                    <label for="player-name">WHAT IS YOUR NAME?</label>
+                    <input type="text" id="player-name" class="terminal-input" maxlength="20" autocomplete="off">
+                </div>
+                <div class="input-group">
+                    <label for="session-code">SESSION CODE (optional)</label>
+                    <input type="text" id="session-code" class="terminal-input" maxlength="4" autocomplete="off">
+                </div>
+                <button id="btn-join" class="terminal-btn">PRESS ENTER TO BEGIN</button>
+                <p id="join-error" class="error-text"></p>
+            </div>
+        </section>
+
+        <!-- SCREEN: Lobby -->
+        <section id="screen-lobby" class="screen" hidden>
+            <div class="screen-content">
+                <h1>OREGON TRAIL:<br/>CLASSROOM EDITION</h1>
+                <p class="subtitle">WAITING IN THE LOBBY</p>
+                <div id="lobby-info" class="lobby-panel">
+                    <p>Your party: <span id="lobby-party-name" class="highlight">Not assigned yet</span></p>
+                    <p>Party members:</p>
+                    <ul id="lobby-members" class="member-list"></ul>
+                </div>
+                <p class="status-msg">Waiting for the teacher to start the game...</p>
+            </div>
+        </section>
+
+        <!-- SCREEN: Game -->
+        <section id="screen-game" class="screen" hidden>
+            <!-- Status Bar -->
+            <header class="status-bar">
+                <div class="stat-group">
+                    <span class="stat">DATE: <span id="stat-date" class="highlight">---</span></span>
+                    <span class="stat">WEATHER: <span id="stat-weather" class="highlight">---</span></span>
+                    <span class="stat">NEXT: <span id="stat-next" class="highlight">---</span></span>
+                </div>
+                <div class="stat-group">
+                    <span class="stat">MILES: <span id="stat-miles" class="highlight">0</span></span>
+                    <span class="stat">FOOD: <span id="stat-food" class="highlight">0</span></span>
+                    <span class="stat">HEALTH: <span id="stat-health" class="highlight">GOOD</span></span>
+                </div>
+            </header>
+
+            <!-- Main Content Area -->
+            <div class="game-body">
+                <!-- Left: Event Log -->
+                <main class="viewport" id="game-log" aria-live="polite" aria-atomic="false">
+                    <p class="narrative">Welcome to Oregon Trail: Classroom Edition!</p>
+                </main>
+
+                <!-- Right: Sidebar -->
+                <aside class="sidebar">
+                    <div class="panel" id="party-panel">
+                        <h3>YOUR PARTY</h3>
+                        <ul id="party-members" class="member-list"></ul>
+                    </div>
+                    <div class="panel" id="inventory-panel">
+                        <h3>INVENTORY</h3>
+                        <ul id="inventory-list" class="info-list"></ul>
+                    </div>
+                    <div class="panel" id="leaderboard-panel">
+                        <h3>ALL PARTIES</h3>
+                        <ul id="leaderboard" class="info-list"></ul>
+                    </div>
+                </aside>
+            </div>
+
+            <!-- Decision / Action Panel -->
+            <footer class="input-panel" id="decision-panel" hidden>
+                <div class="decision-prompt" id="decision-prompt">WHAT IS YOUR CHOICE?</div>
+                <div class="decision-timer" id="decision-timer"></div>
+                <div class="choices" id="choices"></div>
+            </footer>
+
+            <footer class="input-panel" id="action-panel">
+                <span class="prompt">NO DECISION PENDING</span>
+            </footer>
+        </section>
+
+        <!-- SCREEN: Hunting -->
+        <section id="screen-hunting" class="screen" hidden>
+            <div class="screen-content" style="max-width: 900px; position: relative;">
+                <div class="status-bar" style="width: 100%; margin-bottom: 0.5rem; border-color: var(--term-warn);">
+                    <div class="stat-group">
+                        <span class="stat">HUNTING IN PROGRESS</span>
+                        <span class="stat">AMMO: <span id="hunt-ammo" class="highlight">0</span></span>
+                    </div>
+                    <div class="stat-group">
+                        <span class="stat">TIME: <span id="hunt-timer" class="highlight">0</span>s</span>
+                    </div>
+                </div>
+                
+                <div class="canvas-container" style="border: 2px solid var(--term-green); background: #000; position: relative; cursor: crosshair;">
+                    <canvas id="hunting-canvas" width="640" height="400" style="width: 100%; height: auto; display: block; image-rendering: pixelated;"></canvas>
+                    <div id="hunt-overlay" style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.7); pointer-events: none;" hidden>
+                        <h2 id="hunt-overlay-text">GET READY!</h2>
+                    </div>
+                </div>
+
+                <div style="margin-top: 1rem; width: 100%; text-align: center;">
+                    <p class="status-msg">MOVE MOUSE TO AIM · CLICK TO FIRE</p>
+                    <button id="btn-end-hunt" class="terminal-btn" style="border-color: var(--term-danger); color: var(--term-danger); margin-top: 0.5rem;">ABANDON HUNT</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- SCREEN: Game Over -->
+        <section id="screen-gameover" class="screen" hidden>
+            <div class="screen-content">
+                <h1 id="gameover-title">JOURNEY'S END</h1>
+                <p id="gameover-message" class="subtitle"></p>
+                <div id="gameover-stats" class="lobby-panel"></div>
+                <p class="status-msg">Waiting for the teacher to dismiss...</p>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- ARIA live region for screen readers -->
+    <div id="aria-live" aria-live="polite" aria-atomic="false" class="sr-only"></div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script type="module" src="/static/js/main.js"></script>
+</body>
+</html>
