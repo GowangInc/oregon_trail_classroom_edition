@@ -196,7 +196,7 @@ class PartyEngine:
                         ],
                         captain_id=party.captain_id,
                         captain_default="Keep pace and rations",
-                        timeout_seconds=45,
+                        timeout_seconds=5,
                     )
                 else:
                     # Regular travel decision: hunt, rest, or continue
@@ -207,7 +207,7 @@ class PartyEngine:
                         options=["Continue on", "Hunt for food", "Rest for a day"],
                         captain_id=party.captain_id,
                         captain_default="Continue on",
-                        timeout_seconds=45,
+                        timeout_seconds=5,
                     )
 
         # 9. Check landmark arrival
@@ -241,7 +241,7 @@ class PartyEngine:
                     options=["Ford the river", "Caulk the wagon", "Take a ferry", "Wait for better conditions"],
                     captain_id=party.captain_id,
                     captain_default="Ford the river",
-                    timeout_seconds=45,
+                    timeout_seconds=5,
                 )
             elif next_lm.is_fort:
                 party.status = "decision"
@@ -253,7 +253,7 @@ class PartyEngine:
                     options=["Buy supplies", "Continue on"],
                     captain_id=party.captain_id,
                     captain_default="Continue on",
-                    timeout_seconds=45,
+                    timeout_seconds=5,
                 )
             else:
                 party.status = "decision"
@@ -265,7 +265,7 @@ class PartyEngine:
                     options=["Rest here", "Hunt for food", "Continue on"],
                     captain_id=party.captain_id,
                     captain_default="Continue on",
-                    timeout_seconds=45,
+                    timeout_seconds=5,
                 )
 
         # Check if all dead

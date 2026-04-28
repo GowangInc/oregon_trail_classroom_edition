@@ -8,5 +8,15 @@
     "epitaph": "Here lies dasf, who died of exhaustion.",
     "written_by_party_id": "dbfbe5de",
     "visited_by_party_ids": []
+  },
+  {
+    "player_name": "nicholas",
+    "party_name": "Wagon Party 1",
+    "mile_marker": 28,
+    "cause": "dysentery",
+    "date": "1848-03-11",
+    "epitaph": "Here lies nicholas, who died of dysentery.",
+    "written_by_party_id": "58805612",
+    "visited_by_party_ids": []
   }
 ]

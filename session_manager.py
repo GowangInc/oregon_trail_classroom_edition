@@ -575,6 +575,12 @@ class SessionManager:
             if not engine:
                 return False
 
+            import time
+            current_time = time.time()
+            if current_time - getattr(party, 'last_vote_called_at', 0.0) < 120:
+                return False
+            party.last_vote_called_at = current_time
+
             if vote_type == "pace":
                 party.status = "decision"
                 party.decision_pending = Decision(
@@ -590,7 +596,7 @@ class SessionManager:
                     ],
                     captain_id=party.captain_id,
                     captain_default="Keep pace and rations",
-                    timeout_seconds=45,
+                    timeout_seconds=5,
                 )
             elif vote_type == "hunt":
                 party.status = "decision"
@@ -601,7 +607,7 @@ class SessionManager:
                     options=["Hunt", "Continue on"],
                     captain_id=party.captain_id,
                     captain_default="Continue on",
-                    timeout_seconds=45,
+                    timeout_seconds=5,
                 )
             elif vote_type == "rest":
                 party.status = "decision"
@@ -612,7 +618,7 @@ class SessionManager:
                     options=["Rest here", "Continue on"],
                     captain_id=party.captain_id,
                     captain_default="Continue on",
-                    timeout_seconds=45,
+                    timeout_seconds=5,
                 )
             else:
                 return False

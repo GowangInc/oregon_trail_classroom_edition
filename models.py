@@ -239,6 +239,7 @@ class Party:
     tombstones: List[Tombstone] = field(default_factory=list)
     score: int = 0
     hunting_region_depletion: float = 0.0  # 0.0 to 1.0
+    last_vote_called_at: float = 0.0
 
     @property
     def is_alive(self) -> bool:

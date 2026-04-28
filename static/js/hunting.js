@@ -24,6 +24,19 @@ let bullets = [];
 let mouseX = canvas.width / 2;
 let mouseY = canvas.height / 2;
 
+// Hunter State
+let hx = canvas.width / 2;
+let hy = canvas.height / 2;
+let hdx = 1; // Facing direction X
+let hdy = 0; // Facing direction Y
+let hSpeed = 3;
+
+// Keyboard State
+const keys = {
+    ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false,
+    w: false, a: false, s: false, d: false, ' ': false
+};
+
 // ------------------------------------------------------------------
 // Retro Assets (1 = pixel, space = empty)
 // ------------------------------------------------------------------
@@ -36,7 +49,7 @@ const SPRITES = {
         "  111  ",
         "  111  ",
         " 11111 ",
-        "   1   ",
+        " 1 1 1 ",
         "  1 1  ",
         "  1 1  "
     ],
@@ -45,7 +58,7 @@ const SPRITES = {
         "  111  ",
         "  111  ",
         " 1111111",
-        "   1   ",
+        " 1 1   ",
         "  1 1  ",
         "  1 1  "
     ],
@@ -166,6 +179,10 @@ export function start(state, playerId) {
     animals = [];
     bullets = [];
     huntStartTime = Date.now();
+    hx = canvas.width / 2;
+    hy = canvas.height / 2;
+    hdx = 1;
+    hdy = 0;
     
     updateUI();
     
@@ -213,6 +230,25 @@ function updateGameLogic() {
     if (Math.random() < 0.02 && animals.length < 5) {
         spawnAnimal();
     }
+    
+    // Move Hunter
+    let moving = false;
+    let newHdx = 0;
+    let newHdy = 0;
+    
+    if (keys.ArrowUp || keys.w) { hy -= hSpeed; newHdy = -1; moving = true; }
+    if (keys.ArrowDown || keys.s) { hy += hSpeed; newHdy = 1; moving = true; }
+    if (keys.ArrowLeft || keys.a) { hx -= hSpeed; newHdx = -1; moving = true; }
+    if (keys.ArrowRight || keys.d) { hx += hSpeed; newHdx = 1; moving = true; }
+    
+    if (moving) {
+        hdx = newHdx;
+        hdy = newHdy;
+    }
+    
+    // Bounds check hunter
+    hx = Math.max(10, Math.min(canvas.width - 10, hx));
+    hy = Math.max(10, Math.min(canvas.height - 10, hy));
     
     // Update Animals
     for (let i = animals.length - 1; i >= 0; i--) {
@@ -322,23 +358,21 @@ function render() {
     });
     
     // Draw Hunter
-    const hx = canvas.width / 2;
-    const hy = canvas.height - 100;
-    const mouseIsLeft = mouseX < hx;
-    drawSprite(SPRITES['hunter_shoot_right'], hx - 14, hy, mouseIsLeft);
+    const mouseIsLeft = hdx < 0;
+    // Basic sprite selection
+    const spriteName = (hdx !== 0 || hdy !== 0) ? 'hunter_shoot_right' : 'hunter';
+    drawSprite(SPRITES[spriteName], hx - 14, hy - 14, mouseIsLeft);
     
     // Draw Bullets
     bullets.forEach(b => {
         ctx.fillRect(b.x, b.y, 4, 4);
     });
     
-    // Draw Crosshair
-    ctx.strokeStyle = TERM_GREEN;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(mouseX - 10, mouseY); ctx.lineTo(mouseX + 10, mouseY);
-    ctx.moveTo(mouseX, mouseY - 10); ctx.lineTo(mouseX, mouseY + 10);
-    ctx.stroke();
+    // Draw crosshair or sight line to show direction
+    if (bulletsLeft > 0) {
+        ctx.fillStyle = 'rgba(74, 246, 38, 0.3)';
+        ctx.fillRect(hx + hdx * 20, hy + hdy * 20 + 10, 4, 4);
+    }
 }
 
 function updateUI(remaining = huntDuration) {
@@ -380,38 +414,68 @@ function finishHunt() {
 // ------------------------------------------------------------------
 
 if (canvas) {
-    canvas.addEventListener('mousemove', (e) => {
+    // Also listen to keyboard for movement and shooting
+    document.addEventListener('keydown', (e) => {
+        if (!isRunning) return;
+        if (keys.hasOwnProperty(e.key)) {
+            keys[e.key] = true;
+            if (e.key === ' ' || e.key === 'Spacebar') {
+                e.preventDefault(); // prevent scrolling
+                fireBullet();
+            }
+        }
+    });
+
+    document.addEventListener('keyup', (e) => {
+        if (!isRunning) return;
+        if (keys.hasOwnProperty(e.key)) {
+            keys[e.key] = false;
+        }
+    });
+    
+    // Mouse fallback for shooting
+    canvas.addEventListener('mousedown', (e) => {
+        if (!isRunning) return;
+        
+        // Calculate direction towards mouse
         const rect = canvas.getBoundingClientRect();
         const scaleX = canvas.width / rect.width;
         const scaleY = canvas.height / rect.height;
-        mouseX = (e.clientX - rect.left) * scaleX;
-        mouseY = (e.clientY - rect.top) * scaleY;
-    });
+        const mx = (e.clientX - rect.left) * scaleX;
+        const my = (e.clientY - rect.top) * scaleY;
+        
+        const dx = mx - hx;
+        const dy = my - hy;
+        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+        hdx = dx / dist;
+        hdy = dy / dist;
 
-    canvas.addEventListener('mousedown', (e) => {
-        if (!isRunning || bulletsLeft <= 0) return;
-        initAudio(); // Assure audio is resumed
-        
-        bulletsLeft--;
-        playGunshot();
-        
-        // Fire bullet
-        const hx = canvas.width / 2;
-        const hy = canvas.height - 100 + 10; // offset gun height
-        const dx = mouseX - hx;
-        const dy = mouseY - hy;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        
-        bullets.push({
-            x: hx,
-            y: hy,
-            vx: (dx / dist) * 15,
-            vy: (dy / dist) * 15,
-            life: 50
-        });
-        
-        updateUI();
+        fireBullet();
     });
+}
+
+function fireBullet() {
+    if (bulletsLeft <= 0) return;
+    initAudio();
+    
+    bulletsLeft--;
+    playGunshot();
+    
+    // Normalize direction
+    let dx = hdx;
+    let dy = hdy;
+    if (dx === 0 && dy === 0) dx = 1; // default fire right
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    
+    bullets.push({
+        x: hx,
+        y: hy + 10,
+        vx: (dx / dist) * 15,
+        vy: (dy / dist) * 15,
+        life: 50
+    });
+    
+    updateUI();
 }
 
 if (btnEnd) {
