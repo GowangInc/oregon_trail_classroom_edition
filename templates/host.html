@@ -16,6 +16,7 @@
         <!-- SCREEN: Host Setup -->
         <section id="screen-host-setup" class="screen active">
             <div class="screen-content">
+                <p id="conn-status" class="status-msg" style="position: absolute; top: 1rem;"></p>
                 <pre class="ascii-art">
   _    _           _     _
  | |  | |         | |   | |
@@ -38,6 +39,7 @@
             <div class="screen-content" style="justify-content: flex-start; padding-top: 2rem;">
                 <h1>SESSION: <span id="host-session-code" class="highlight">---</span></h1>
                 <p class="status-msg">Share this code with students to join.</p>
+                <p class="status-msg" style="color: var(--term-green);">STUDENT URL: <span id="host-server-url" class="highlight">---</span></p>
 
                 <div style="display: flex; gap: 1rem; width: 100%; max-width: 900px; flex-wrap: wrap;">
                     <!-- Players Pool -->
@@ -59,7 +61,12 @@
                     </div>
                 </div>
 
-                <button id="btn-start-game" class="terminal-btn" style="margin-top: 1rem;">START GAME</button>
+                <div style="display: flex; gap: 1rem; margin-top: 1rem; flex-wrap: wrap; justify-content: center;">
+                    <button id="btn-quick-start" class="terminal-btn" style="min-width: auto; color: var(--term-green); border-color: var(--term-green);">QUICK START</button>
+                    <button id="btn-start-outfitting" class="terminal-btn" style="min-width: auto;">START OUTFITTING</button>
+                    <button id="btn-begin-journey" class="terminal-btn" style="min-width: auto; color: var(--term-warn); border-color: var(--term-warn);" hidden>BEGIN JOURNEY</button>
+                </div>
+                <p id="lobby-hint" class="status-msg" style="margin-top: 0.5rem; font-size: 0.9rem;">Create a party, drag players in, then click START OUTFITTING.</p>
             </div>
         </section>
 
@@ -73,6 +80,7 @@
                         <span class="stat">DATE: <span id="dash-date" class="highlight">---</span></span>
                         <span class="stat">WEATHER: <span id="dash-weather" class="highlight">---</span></span>
                         <span class="stat">STATUS: <span id="dash-status" class="highlight">---</span></span>
+                        <span class="stat">URL: <span id="dash-server-url" class="highlight">---</span></span>
                     </div>
                     <div class="stat-group">
                         <span class="stat">TICK: <span id="dash-tick">0</span></span>
@@ -81,6 +89,8 @@
 
                 <!-- Control Bar -->
                 <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; padding: 0.3rem;">
+                    <button id="btn-new-session" class="terminal-btn" style="min-width: auto; font-size: 0.9rem; color: #ff4444; border-color: #ff4444;">NEW SESSION</button>
+                    <button id="btn-open-map" class="terminal-btn" style="min-width: auto; font-size: 0.9rem; color: #4af626; border-color: #4af626;" onclick="window.open('/map', '_blank')">OPEN MAP</button>
                     <button id="btn-save" class="terminal-btn" style="min-width: auto; font-size: 0.9rem; color: #4af626; border-color: #4af626;">SAVE GAME</button>
                     <button id="btn-load" class="terminal-btn" style="min-width: auto; font-size: 0.9rem; color: #ffeb3b; border-color: #ffeb3b;">LOAD GAME</button>
                     <button id="btn-pause" class="terminal-btn" style="min-width: auto; font-size: 0.9rem;">PAUSE</button>
@@ -99,13 +109,13 @@
                 <!-- Main Dashboard -->
                 <div style="display: flex; flex: 1; gap: 0.5rem; min-height: 0;">
                     <!-- Party Cards -->
-                    <div class="viewport" id="dash-parties" style="flex: 2;">
+                    <div class="viewport" id="dash-parties" style="flex: 2; min-height: 0;">
                         <h3>ALL PARTIES</h3>
                         <div id="party-cards"></div>
                     </div>
 
                     <!-- Tools Panel -->
-                    <div class="sidebar" style="width: 300px;">
+                    <div class="sidebar" style="width: 280px; min-height: 0;">
                         <div class="panel">
                             <h3>EVENT INJECTION</h3>
                             <select id="sel-party-inject" class="terminal-input" style="width: 100%; margin-bottom: 0.5rem;">
@@ -127,10 +137,16 @@
                         </div>
 
                         <div class="panel">
-                            <h3>GLOBAL LOG</h3>
-                            <div id="host-log" style="font-size: 0.9rem; max-height: 200px; overflow-y: auto;"></div>
+                            <h3>TOMBSTONES</h3>
+                            <div id="host-tombstones" style="font-size: 0.85rem; max-height: 150px; overflow-y: auto;"></div>
                         </div>
                     </div>
+                </div>
+
+                <!-- Global Log (full width, large) -->
+                <div class="panel" style="margin-top: 0.5rem; flex: 1; min-height: 0; display: flex; flex-direction: column;">
+                    <h3 style="margin: 0 0 0.3rem 0;">📜 GLOBAL LOG</h3>
+                    <div id="host-log" style="font-size: 0.9rem; flex: 1; overflow-y: auto; min-height: 300px; max-height: 50vh; border: 1px solid var(--term-border); padding: 0.5rem;"></div>
                 </div>
             </div>
         </section>

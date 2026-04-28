@@ -168,6 +168,14 @@ export function start(state, playerId) {
     huntStartTime = Date.now();
     
     updateUI();
+    
+    if (bulletsLeft <= 0) {
+        showOverlay('NO BULLETS! HUNT FAILED.', 3000, () => {
+            finishHunt();
+        });
+        return;
+    }
+    
     showOverlay('INITIATING CRT MODULE...', 2000, () => {
         initAudio(); // Required to start within user gesture (usually satisfied implicitly)
         requestAnimationFrame(gameLoop);

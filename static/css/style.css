@@ -184,12 +184,12 @@ h1, h2, h3 {
     border: 1px solid var(--term-green);
     color: var(--term-green);
     font-family: inherit;
-    font-size: 1.1rem;
-    padding: 0.6rem 1.2rem;
+    font-size: 1.4rem;
+    padding: 1rem 1.5rem;
     cursor: pointer;
     text-transform: uppercase;
     transition: all 0.15s;
-    min-width: 200px;
+    min-width: 250px;
 }
 
 .terminal-btn:hover,
@@ -382,10 +382,11 @@ h1, h2, h3 {
     border: 1px solid var(--term-green);
     color: var(--term-green);
     font-family: inherit;
-    font-size: 1rem;
-    padding: 0.4rem 0.8rem;
+    font-size: 1.3rem;
+    padding: 0.8rem 1.2rem;
     cursor: pointer;
     text-transform: uppercase;
+    min-width: 150px;
 }
 
 .choice-btn:hover,
@@ -498,4 +499,60 @@ h1, h2, h3 {
     background: var(--term-green);
     box-shadow: 0 0 5px var(--term-glow);
     transition: width 0.5s;
+}
+
+/* Outfitting Screen */
+#screen-outfitting .profession-btn {
+    text-align: center;
+    padding: 0.5rem;
+    line-height: 1.2;
+}
+#screen-outfitting .profession-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+#screen-outfitting .store-qty {
+    background: var(--term-bg);
+    color: var(--term-green);
+    border: 1px solid var(--term-border);
+    font-family: var(--term-font);
+    font-size: 1rem;
+}
+#screen-outfitting .store-buy {
+    min-width: 50px;
+}
+
+/* Tombstone styles */
+.death-badge {
+    color: var(--term-danger);
+    text-decoration: line-through;
+}
+.captain-badge {
+    display: inline-block;
+    margin-left: 0.3rem;
+    padding: 0 0.3rem;
+    font-size: 0.7rem;
+    border: 1px solid var(--term-warn);
+    color: var(--term-warn);
+}
+
+/* Epitaph editor */
+#epitaph-editor textarea {
+    background: var(--term-bg);
+    color: var(--term-green);
+    border: 1px solid var(--term-border);
+    font-family: var(--term-font);
+    font-size: 1.1rem;
+}
+
+/* Host log tombstone entries */
+.host-log-tombstone {
+    border-left: 3px solid #aa88ff !important;
+    background: rgba(170, 136, 255, 0.08);
+    padding-left: 0.5rem !important;
+}
+
+/* Host dashboard layout fixes */
+#screen-host-dash .screen-content {
+    overflow: hidden;
 }

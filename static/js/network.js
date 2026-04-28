@@ -27,6 +27,7 @@ const callbacks = {
     onHostInjectedEvent: null,
     onGameOver: null,
     onError: null,
+    onTombstoneEpitaph: null,
 };
 
 function init(isHostFlag = false, hostPassword = null) {
@@ -70,6 +71,7 @@ function init(isHostFlag = false, hostPassword = null) {
             playerId = data.player_id;
             sessionStorage.setItem('player_id', playerId);
             isHost = data.is_host;
+            sessionStorage.setItem('is_host', isHost ? '1' : '0');
         }
     });
 

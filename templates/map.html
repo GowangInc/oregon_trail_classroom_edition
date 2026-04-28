@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oregon Trail Map</title>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        body { margin: 0; overflow: hidden; background: #0a0a0a; color: #4af626; font-family: 'VT323', monospace; }
+        #map-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background-color: #121212;
+            overflow: hidden;
+            border: 2px solid #4af626;
+            box-sizing: border-box;
+        }
+        
+        .trail-line {
+            position: absolute;
+            top: 50%;
+            left: 5%;
+            width: 90%;
+            height: 4px;
+            background: repeating-linear-gradient(90deg, #4af626, #4af626 10px, transparent 10px, transparent 20px);
+            opacity: 0.3;
+        }
+
+        .landmark-marker {
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 12px;
+            height: 12px;
+            background-color: #4af626;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #4af626;
+        }
+
+        .landmark-label {
+            position: absolute;
+            top: calc(50% + 15px);
+            transform: translateX(-50%);
+            font-size: 1.2rem;
+            color: #4af626;
+            white-space: nowrap;
+            text-shadow: 0 0 5px #4af626;
+        }
+
+        .party-marker {
+            position: absolute;
+            top: calc(50% - 30px);
+            transform: translateX(-50%);
+            transition: left 1s linear;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 10;
+        }
+
+        .wagon-icon {
+            font-size: 2rem;
+            text-shadow: 0 0 10px currentColor;
+        }
+
+        .party-name {
+            font-size: 1rem;
+            white-space: nowrap;
+            background: rgba(0,0,0,0.8);
+            padding: 2px 5px;
+            border: 1px solid currentColor;
+            margin-top: 5px;
+        }
+
+        #global-status {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            font-size: 1.5rem;
+            text-align: right;
+            background: rgba(0,0,0,0.8);
+            padding: 1rem;
+            border: 1px solid #4af626;
+        }
+    </style>
+</head>
+<body>
+    <div id="map-container">
+        <div class="trail-line"></div>
+        <!-- Landmarks will be rendered here -->
+        <div id="landmarks-layer"></div>
+        <!-- Parties will be rendered here -->
+        <div id="parties-layer"></div>
+        
+        <div id="global-status">
+            <div>DATE: <span id="map-date">---</span></div>
+            <div>WEATHER: <span id="map-weather">---</span></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        const socket = io();
+        
+        const TOTAL_DISTANCE = 2094; // Total miles to Oregon
+        const landmarksData = [
+            { name: "Independence", miles: 0 },
+            { name: "Fort Kearney", miles: 304 },
+            { name: "Chimney Rock", miles: 554 },
+            { name: "Fort Laramie", miles: 640 },
+            { name: "Independence Rock", miles: 830 },
+            { name: "South Pass", miles: 932 },
+            { name: "Fort Bridger", miles: 1057 },
+            { name: "Fort Hall", miles: 1275 },
+            { name: "Fort Boise", miles: 1543 },
+            { name: "Blue Mountains", miles: 1703 },
+            { name: "The Dalles", miles: 1994 },
+            { name: "Oregon City", miles: 2094 }
+        ];
+
+        // Setup landmarks
+        const landmarksLayer = document.getElementById('landmarks-layer');
+        landmarksData.forEach(lm => {
+            const pct = (lm.miles / TOTAL_DISTANCE) * 90 + 5; // Map to 5% - 95% of screen width
+            
+            const marker = document.createElement('div');
+            marker.className = 'landmark-marker';
+            marker.style.left = pct + '%';
+            landmarksLayer.appendChild(marker);
+
+            const label = document.createElement('div');
+            label.className = 'landmark-label';
+            label.style.left = pct + '%';
+            label.textContent = lm.name;
+            // Alternate label positions to prevent overlap
+            if (lm.miles % 2 !== 0) {
+                label.style.top = 'calc(50% - 30px)';
+            }
+            landmarksLayer.appendChild(label);
+        });
+
+        socket.on('connect', () => {
+            socket.emit('join_spectator');
+        });
+
+        const colors = ['#ff4444', '#ffeb3b', '#44aaff', '#ffaa00', '#ff00ff', '#00ffff'];
+
+        socket.on('session_state', (state) => {
+            if (!state) return;
+            
+            document.getElementById('map-date').textContent = state.global_date || '---';
+            document.getElementById('map-weather').textContent = state.global_weather || '---';
+
+            const partiesLayer = document.getElementById('parties-layer');
+            partiesLayer.innerHTML = ''; // Clear parties
+
+            if (!state.parties) return;
+
+            let colorIdx = 0;
+            Object.values(state.parties).forEach(party => {
+                if (party.status === 'dead' || party.distance_traveled === undefined) return;
+
+                const color = colors[colorIdx % colors.length];
+                colorIdx++;
+
+                const dist = Math.min(party.distance_traveled, TOTAL_DISTANCE);
+                const pct = (dist / TOTAL_DISTANCE) * 90 + 5;
+
+                const marker = document.createElement('div');
+                marker.className = 'party-marker';
+                marker.style.left = pct + '%';
+                marker.style.color = color;
+
+                marker.innerHTML = `
+                    <div class="wagon-icon">🐄🚋</div>
+                    <div class="party-name" style="color: ${color}; border-color: ${color}; box-shadow: 0 0 5px ${color};">${party.party_name} (${dist}m)</div>
+                `;
+                
+                // Adjust vertical position slightly to prevent exact overlap
+                const vOffset = (colorIdx % 3 - 1) * 40;
+                marker.style.top = \`calc(50% - 40px + \${vOffset}px)\`;
+
+                partiesLayer.appendChild(marker);
+            });
+        });
+
+        socket.on('disconnect', () => {
+            console.log("Disconnected from server.");
+        });
+    </script>
+</body>
+</html>

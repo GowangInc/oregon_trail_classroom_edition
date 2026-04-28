@@ -17,10 +17,13 @@ const screens = {
 
 const els = {
     setupInfo: document.getElementById('setup-info'),
+    connStatus: document.getElementById('conn-status'),
     sessionCode: document.getElementById('host-session-code'),
+    serverUrl: document.getElementById('host-server-url'),
     unassignedList: document.getElementById('host-unassigned'),
     partiesContainer: document.getElementById('host-parties'),
     dashSessionCode: document.getElementById('dash-session-code'),
+    dashServerUrl: document.getElementById('dash-server-url'),
     dashDate: document.getElementById('dash-date'),
     dashWeather: document.getElementById('dash-weather'),
     dashStatus: document.getElementById('dash-status'),
@@ -39,7 +42,13 @@ const els = {
 // ------------------------------------------------------------------
 // Init
 // ------------------------------------------------------------------
-// Removed immediate init; waiting for explicit connection
+// Auto-reconnect if we have a previous host session stored
+const storedPlayerId = sessionStorage.getItem('player_id');
+const storedIsHost = sessionStorage.getItem('is_host') === '1';
+if (storedPlayerId && storedIsHost) {
+    els.setupInfo.textContent = 'Reconnecting to previous session...';
+    Network.init(true);
+}
 
 Network.on('onConnect', () => {
     console.log('[Host] Connected');
@@ -70,7 +79,21 @@ Network.on('onHostInjectedEvent', (data) => {
 
 Network.on('onError', (data) => {
     console.error('[Host] Error:', data.message);
-    alert('Error: ' + data.message);
+    // If we were trying to auto-reconnect, clear the message and show login
+    if (els.connStatus && els.connStatus.textContent.includes('Reconnecting')) {
+        els.connStatus.textContent = 'Reconnect failed. Please log in again.';
+        sessionStorage.removeItem('player_id');
+        sessionStorage.removeItem('is_host');
+    } else {
+        alert('Error: ' + data.message);
+    }
+});
+
+Network.on('onDisconnect', () => {
+    if (els.connStatus) {
+        els.connStatus.textContent = 'Disconnected. Refresh to reconnect.';
+        els.connStatus.style.color = 'var(--term-danger)';
+    }
 });
 
 // ------------------------------------------------------------------
@@ -101,9 +124,16 @@ document.getElementById('btn-shuffle').addEventListener('click', () => {
     Network.emit('shuffle_parties');
 });
 
-document.getElementById('btn-start-game').addEventListener('click', () => {
+document.getElementById('btn-start-outfitting').addEventListener('click', () => {
     Network.emit('start_game');
-    showScreen('dash');
+});
+
+document.getElementById('btn-begin-journey').addEventListener('click', () => {
+    Network.emit('begin_journey');
+});
+
+document.getElementById('btn-quick-start').addEventListener('click', () => {
+    Network.emit('quick_start');
 });
 
 // ------------------------------------------------------------------
@@ -138,6 +168,13 @@ document.getElementById('btn-advance-7').addEventListener('click', () => {
 document.getElementById('btn-end-game').addEventListener('click', () => {
     if (confirm('End the game for all players?')) {
         Network.emit('end_game');
+    }
+});
+
+document.getElementById('btn-new-session').addEventListener('click', () => {
+    if (confirm('Start a brand new session? All current progress will be lost.')) {
+        Network.emit('new_session');
+        showScreen('setup');
     }
 });
 
@@ -281,6 +318,11 @@ function handleStateUpdate(state) {
     els.sessionCode.textContent = sessionCode || '---';
     els.dashSessionCode.textContent = sessionCode || '---';
 
+    // Update server URL displays
+    const serverUrl = state.server_url || '';
+    if (els.serverUrl) els.serverUrl.textContent = serverUrl || '---';
+    if (els.dashServerUrl) els.dashServerUrl.textContent = serverUrl || '---';
+
     // Update dashboard stats
     els.dashDate.textContent = state.global_date || '---';
     els.dashWeather.textContent = state.global_weather || '---';
@@ -294,13 +336,22 @@ function handleStateUpdate(state) {
         els.lblInterval.textContent = state.auto_advance_interval + 's';
     }
 
-    // Render lobby if in lobby/outfitting
-    if (state.game_status === 'lobby' || state.game_status === 'outfitting') {
+    // Render lobby if in lobby
+    if (state.game_status === 'lobby') {
+        showScreen('lobby');
         renderLobby(state);
+    }
+
+    // Render lobby (outfitting view) if in outfitting
+    if (state.game_status === 'outfitting') {
+        showScreen('lobby');
+        renderLobby(state);
+        renderOutfittingProgress(state);
     }
 
     // Render dashboard if active/paused/ended
     if (['active', 'paused', 'ended'].includes(state.game_status)) {
+        showScreen('dash');
         renderDashboard(state);
     }
 }
@@ -365,6 +416,92 @@ function renderLobby(state) {
         div.appendChild(dropZone);
         els.partiesContainer.appendChild(div);
     });
+
+    // Update lobby hint and button states
+    const unassignedCount = Object.values(state.players || {}).filter(p => !p.is_host && !p.party_id).length;
+    const partyCount = Object.keys(state.parties || {}).length;
+    const totalMembers = Object.values(state.parties || {}).reduce((sum, p) => sum + p.member_ids.length, 0);
+    const startBtn = document.getElementById('btn-start-outfitting');
+    const journeyBtn = document.getElementById('btn-begin-journey');
+    const quickBtn = document.getElementById('btn-quick-start');
+    const hint = document.getElementById('lobby-hint');
+    const isOutfitting = state.game_status === 'outfitting';
+
+    if (hint) {
+        if (isOutfitting) {
+            const readyCount = Object.values(state.parties || {}).filter(p => p.outfitting_complete).length;
+            hint.textContent = `Outfitting phase! ${readyCount}/${partyCount} parties ready. Click BEGIN JOURNEY when ready.`;
+            hint.style.color = readyCount === partyCount ? 'var(--term-green)' : 'var(--term-warn)';
+        } else if (partyCount === 0) {
+            hint.textContent = `Step 1: Click + PARTY to create a party. (${unassignedCount} player(s) waiting)`;
+            hint.style.color = 'var(--term-warn)';
+        } else if (totalMembers === 0) {
+            hint.textContent = `Step 2: Drag players from Unassigned into a party.`;
+            hint.style.color = 'var(--term-warn)';
+        } else {
+            hint.textContent = `Ready! ${totalMembers} player(s) in ${partyCount} party(s). Click START OUTFITTING or QUICK START.`;
+            hint.style.color = 'var(--term-green)';
+        }
+    }
+
+    if (startBtn) {
+        startBtn.hidden = isOutfitting;
+        startBtn.disabled = partyCount === 0 || totalMembers === 0;
+        startBtn.style.opacity = startBtn.disabled ? '0.5' : '1';
+    }
+    if (journeyBtn) {
+        journeyBtn.hidden = !isOutfitting;
+        const readyCount = Object.values(state.parties || {}).filter(p => p.outfitting_complete).length;
+        journeyBtn.disabled = readyCount === 0;
+        journeyBtn.style.opacity = journeyBtn.disabled ? '0.5' : '1';
+    }
+}
+
+function renderOutfittingProgress(state) {
+    // Show outfitting status in party cards area
+    els.partiesContainer.innerHTML = '';
+    Object.values(state.parties || {}).forEach(party => {
+        const div = document.createElement('div');
+        div.className = 'lobby-panel';
+        div.style.marginBottom = '0.5rem';
+        const inv = party.inventory || {};
+        const prof = party.profession || 'Not chosen';
+        div.innerHTML = `
+            <div style="display: flex; justify-content: space-between;">
+                <strong>${party.party_name}</strong>
+                <span style="color: ${party.outfitting_complete ? 'var(--term-green)' : 'var(--term-warn)'};">${party.outfitting_complete ? 'READY' : 'OUTFITTING'}</span>
+            </div>
+            <div style="font-size: 0.85rem;">
+                Profession: ${prof} · Money: $${Math.round(inv.money * 100) / 100}
+                · Oxen: ${inv.oxen || 0} · Food: ${inv.food || 0} lbs
+                · Clothing: ${inv.clothing || 0} · Bullets: ${inv.bullets || 0}
+                · Wheels: ${inv.wagon_wheels || 0} · Axles: ${inv.wagon_axles || 0} · Tongues: ${inv.wagon_tongues || 0}
+            </div>
+        `;
+        els.partiesContainer.appendChild(div);
+    });
+}
+
+function renderTombstones(state) {
+    const container = document.getElementById('host-tombstones');
+    if (!container) return;
+    container.innerHTML = '';
+    const tombstones = state.all_tombstones || [];
+    if (tombstones.length === 0) {
+        container.textContent = 'No tombstones yet.';
+        return;
+    }
+    tombstones.forEach((ts, idx) => {
+        const div = document.createElement('div');
+        div.style.cssText = 'margin-bottom: 0.5rem; border-bottom: 1px solid rgba(102,204,255,0.2); padding-bottom: 0.3rem;';
+        div.innerHTML = `
+            <div><strong>${ts.player_name}</strong> — ${ts.cause} @ mile ${ts.mile_marker}</div>
+            <div style="font-style: italic; opacity: 0.9;">"${ts.epitaph}"</div>
+            <button class="terminal-btn" style="min-width: auto; font-size: 0.75rem; padding: 0.2rem 0.4rem; margin-top: 0.2rem;"
+                onclick="window.__hostEditTombstone(${idx}, '${(ts.epitaph || '').replace(/'/g, "\\'")}')">EDIT</button>
+        `;
+        container.appendChild(div);
+    });
 }
 
 function renderDashboard(state) {
@@ -372,6 +509,9 @@ function renderDashboard(state) {
     const partyIds = Object.keys(state.parties || {});
     updateSelectOptions(els.selPartyInject, partyIds, state.parties);
     updateSelectOptions(els.selPartyEdit, partyIds, state.parties);
+
+    // Tombstones
+    renderTombstones(state);
 
     // Party cards
     els.partyCards.innerHTML = '';
@@ -441,12 +581,37 @@ function updateControlUI() {
 
 function addHostLog(msg) {
     const p = document.createElement('div');
-    p.style.cssText = 'margin-bottom: 0.2rem; border-bottom: 1px solid rgba(102,204,255,0.1); padding-bottom: 0.2rem;';
-    const time = new Date().toLocaleTimeString();
-    p.textContent = `[${time}] ${msg}`;
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    // Color-code different event types
+    let color = 'var(--term-green)';
+    let isTombstone = false;
+    if (msg.includes('tombstone') || msg.includes('Tombstone')) {
+        color = '#aa88ff';
+        isTombstone = true;
+    } else if (msg.includes('died') || msg.includes('dead') || msg.includes('perished') || msg.includes('DECEASED')) {
+        color = 'var(--term-danger)';
+    } else if (msg.includes('reached') || msg.includes('Oregon') || msg.includes('finished') || msg.includes('landmark')) {
+        color = 'var(--term-info)';
+    } else if (msg.includes('hunt') || msg.includes('Hunt')) {
+        color = '#ffaa00';
+    } else if (msg.includes('decision') || msg.includes('vote') || msg.includes('Vote')) {
+        color = '#cc88ff';
+    } else if (msg.includes('rest') || msg.includes('Rest')) {
+        color = '#88ccff';
+    } else if (msg.includes('event') || msg.includes('Event') || msg.includes('injured') || msg.includes('broken')) {
+        color = '#ff6666';
+    }
+
+    p.style.cssText = 'margin-bottom: 0.3rem; border-bottom: 1px solid rgba(102,204,255,0.15); padding-bottom: 0.3rem; font-size: 0.9rem; line-height: 1.3;';
+    if (isTombstone) {
+        p.classList.add('host-log-tombstone');
+    }
+
+    p.innerHTML = `<span style="opacity: 0.6; font-size: 0.8rem;">[${time}]</span> <span style="color: ${color};">${msg}</span>`;
     els.hostLog.appendChild(p);
     els.hostLog.scrollTop = els.hostLog.scrollHeight;
-    while (els.hostLog.children.length > 100) {
+    while (els.hostLog.children.length > 500) {
         els.hostLog.removeChild(els.hostLog.firstChild);
     }
 }
@@ -465,4 +630,11 @@ function showScreen(name) {
 // Expose force decision helper globally for inline onclick handlers
 window.__hostForceDecision = (partyId, choice) => {
     Network.emit('host_override_decision', { party_id: partyId, choice });
+};
+
+window.__hostEditTombstone = (idx, currentEpitaph) => {
+    const newEpitaph = prompt('Edit epitaph:', currentEpitaph);
+    if (newEpitaph !== null) {
+        Network.emit('host_edit_tombstone', { tombstone_index: idx, epitaph: newEpitaph });
+    }
 };

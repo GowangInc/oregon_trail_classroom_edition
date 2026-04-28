@@ -5,13 +5,13 @@
 const screens = {
     join: document.getElementById('screen-join'),
     lobby: document.getElementById('screen-lobby'),
+    outfitting: document.getElementById('screen-outfitting'),
     game: document.getElementById('screen-game'),
     gameover: document.getElementById('screen-gameover'),
 };
 
 const els = {
     joinName: document.getElementById('player-name'),
-    joinCode: document.getElementById('session-code'),
     joinError: document.getElementById('join-error'),
     lobbyPartyName: document.getElementById('lobby-party-name'),
     lobbyMembers: document.getElementById('lobby-members'),
@@ -33,6 +33,12 @@ const els = {
     gameoverTitle: document.getElementById('gameover-title'),
     gameoverMessage: document.getElementById('gameover-message'),
     gameoverStats: document.getElementById('gameover-stats'),
+};
+
+// Outfitting UI state
+let outfittingState = {
+    profession: null,
+    money: 0,
 };
 
 let currentDecision = null;
@@ -127,6 +133,9 @@ function updateGame(state, myPlayerId) {
         const li = document.createElement('li');
         li.className = player.is_alive ? '' : 'dead-badge';
         li.textContent = player.name;
+        if (player.is_npc) {
+            li.textContent += ' (NPC)';
+        }
         if (mid === party.captain_id) {
             const badge = document.createElement('span');
             badge.className = 'captain-badge';
@@ -138,6 +147,14 @@ function updateGame(state, myPlayerId) {
         }
         els.partyMembers.appendChild(li);
     });
+
+    // Captain's Call panel
+    const captainPanel = document.getElementById('captain-panel');
+    if (captainPanel) {
+        const isCaptain = myPlayerId === party.captain_id;
+        const me = state.players[myPlayerId];
+        captainPanel.hidden = !isCaptain || !me || !me.is_alive;
+    }
 
     // Inventory
     els.inventoryList.innerHTML = '';
@@ -331,11 +348,189 @@ function getMyPartyId() {
     return myPartyId;
 }
 
+// ------------------------------------------------------------------
+// Outfitting Screen
+// ------------------------------------------------------------------
+function renderOutfittingScreen(state, myPlayerId) {
+    const party = Object.values(state.parties || {}).find(p => p.member_ids && p.member_ids.includes(myPlayerId));
+    if (!party) return;
+
+    const isCaptain = party.captain_id === myPlayerId;
+    const professionEl = document.getElementById('profession-selected');
+    const storeItemsEl = document.getElementById('store-items');
+    const moneyEl = document.getElementById('store-money');
+    const readyBtn = document.getElementById('btn-outfit-ready');
+    const statusEl = document.getElementById('outfit-status');
+
+    // Party name input
+    const nameInput = document.getElementById('outfit-party-name');
+    if (nameInput) {
+        nameInput.value = party.party_name || '';
+        nameInput.disabled = !isCaptain || party.outfitting_complete;
+        nameInput.onchange = () => {
+            if (!isCaptain) return;
+            window.dispatchEvent(new CustomEvent('set-party-name', {
+                detail: { party_id: party.party_id, name: nameInput.value.trim() }
+            }));
+        };
+    }
+
+    // Profession display
+    const profMap = {
+        'Banker from Boston': 'Banker ($1,600)',
+        'Carpenter from Ohio': 'Carpenter ($800)',
+        'Farmer from Illinois': 'Farmer ($400)',
+    };
+    const hasProf = party.inventory && party.inventory.money > 0;
+    const profName = hasProf ? (party.profession || 'Unknown') : 'Not selected';
+    professionEl.textContent = profMap[profName] || profName;
+
+    // Money display
+    const money = party.inventory ? party.inventory.money : 0;
+    moneyEl.textContent = `$${Math.round(money * 100) / 100}`;
+
+    // Store items
+    const prices = {
+        oxen: 40,
+        food: 0.10,
+        clothing: 10,
+        bullets: 2,
+        wagon_wheel: 10,
+        wagon_axle: 10,
+        wagon_tongue: 10,
+    };
+    const labels = {
+        oxen: 'Oxen (yoke)',
+        food: 'Food (lbs)',
+        clothing: 'Clothing (sets)',
+        bullets: 'Bullets (boxes of 20)',
+        wagon_wheel: 'Wagon Wheels',
+        wagon_axle: 'Wagon Axles',
+        wagon_tongue: 'Wagon Tongues',
+    };
+
+    if (storeItemsEl && storeItemsEl.children.length === 0) {
+        Object.entries(prices).forEach(([item, price]) => {
+            const row = document.createElement('div');
+            row.style.cssText = 'display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;';
+            row.innerHTML = `
+                <span style="flex: 1;">${labels[item]} — $${price} each</span>
+                <input type="number" class="terminal-input store-qty" data-item="${item}" value="0" min="0" style="width: 60px; text-align: center;" ${isCaptain ? '' : 'disabled'}>
+                <button class="terminal-btn store-buy" data-item="${item}" data-price="${price}" style="min-width: auto; font-size: 0.85rem; padding: 0.2rem 0.5rem;" ${isCaptain ? '' : 'disabled'}>BUY</button>
+            `;
+            storeItemsEl.appendChild(row);
+        });
+
+        // Wire up buy buttons (once)
+        storeItemsEl.querySelectorAll('.store-buy').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const item = btn.dataset.item;
+                const qtyInput = storeItemsEl.querySelector(`.store-qty[data-item="${item}"]`);
+                const qty = parseInt(qtyInput.value, 10) || 0;
+                if (qty > 0) {
+                    window.dispatchEvent(new CustomEvent('buy-supplies', {
+                        detail: { party_id: party.party_id, item, quantity: qty }
+                    }));
+                    qtyInput.value = '0';
+                }
+            });
+        });
+    }
+
+    // Profession buttons (enabled until money is set, since profession defaults to Banker)
+    const hasProfession = party.inventory && party.inventory.money > 0;
+    document.querySelectorAll('.profession-btn').forEach(btn => {
+        btn.disabled = !isCaptain || hasProfession;
+        btn.style.opacity = btn.disabled ? '0.5' : '1';
+        btn.onclick = () => {
+            if (!isCaptain) return;
+            window.dispatchEvent(new CustomEvent('choose-profession', {
+                detail: { party_id: party.party_id, profession: btn.dataset.prof }
+            }));
+        };
+    });
+
+    // Ready button
+    if (readyBtn) {
+        readyBtn.disabled = !isCaptain || !hasProfession || party.outfitting_complete;
+        readyBtn.onclick = () => {
+            window.dispatchEvent(new CustomEvent('party-ready', {
+                detail: { party_id: party.party_id }
+            }));
+        };
+    }
+
+    if (statusEl) {
+        if (!isCaptain) {
+            statusEl.textContent = 'Waiting for the captain to finish outfitting...';
+        } else if (party.outfitting_complete) {
+            statusEl.textContent = 'Your party is ready to depart!';
+        } else {
+            statusEl.textContent = 'Choose a profession and buy supplies, then click READY.';
+        }
+    }
+}
+
+// ------------------------------------------------------------------
+// Epitaph Editor
+// ------------------------------------------------------------------
+function showEpitaphEditor(playerName, partyId, tombstoneIndex) {
+    // Remove any existing epitaph editor first
+    const existing = document.getElementById('epitaph-editor');
+    if (existing) existing.remove();
+
+    const panel = document.createElement('div');
+    panel.id = 'epitaph-editor';
+    panel.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 10001;';
+    panel.innerHTML = `
+        <div style="border: 2px solid var(--term-green); background: #000; padding: 1.5rem; max-width: 420px; width: 90%; box-shadow: 0 0 20px rgba(74,246,38,0.3);">
+            <h2 style="margin-top: 0; color: var(--term-green);">☗ Write an Epitaph</h2>
+            <p style="margin-bottom: 0.5rem;"><strong>${playerName}</strong> has died. What should the tombstone say?</p>
+            <textarea class="terminal-input epitaph-text" rows="3" style="width: 100%; margin-bottom: 1rem; resize: none;" placeholder="Here lies..." maxlength="200"></textarea>
+            <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+                <button class="terminal-btn epitaph-cancel" style="min-width: auto;">Skip</button>
+                <button class="terminal-btn epitaph-submit" style="min-width: auto; color: var(--term-green); border-color: var(--term-green);">Write Epitaph</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(panel);
+
+    const textarea = panel.querySelector('.epitaph-text');
+    const cancelBtn = panel.querySelector('.epitaph-cancel');
+    const submitBtn = panel.querySelector('.epitaph-submit');
+
+    cancelBtn.onclick = () => panel.remove();
+    submitBtn.onclick = () => {
+        const text = textarea.value.trim();
+        if (text) {
+            window.dispatchEvent(new CustomEvent('submit-epitaph', {
+                detail: { party_id: partyId, tombstone_index: tombstoneIndex, epitaph: text }
+            }));
+        }
+        panel.remove();
+    };
+
+    // Keyboard shortcuts
+    textarea.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            submitBtn.click();
+        }
+        if (e.key === 'Escape') {
+            cancelBtn.click();
+        }
+    });
+
+    textarea.focus();
+}
+
 export {
     showScreen,
     setJoinError,
     updateLobby,
     updateGame,
+    renderOutfittingScreen,
+    showEpitaphEditor,
     addEventToLog,
     showGameOver,
     getMyPartyId,

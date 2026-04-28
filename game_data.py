@@ -204,14 +204,14 @@ WEATHER_SPEED_MODIFIER: Dict[Weather, float] = {
 }
 
 WEATHER_HEALTH_IMPACT: Dict[Weather, int] = {
-    Weather.VERY_HOT: -2,
-    Weather.HOT: -1,
+    Weather.VERY_HOT: -1,
+    Weather.HOT: 0,
     Weather.WARM: 0,
     Weather.COOL: 0,
-    Weather.COLD: -2,
-    Weather.VERY_COLD: -4,
-    Weather.RAIN: -1,
-    Weather.SNOW: -3,
+    Weather.COLD: -1,
+    Weather.VERY_COLD: -2,
+    Weather.RAIN: 0,
+    Weather.SNOW: -1,
 }
 
 # Season-based weather probabilities (by month)
@@ -370,7 +370,7 @@ ILLNESS_TYPES = [
     "broken leg",
 ]
 
-ILLNESS_BASE_PROBABILITY = 0.025  # per person per day
+ILLNESS_BASE_PROBABILITY = 0.012  # per person per day
 
 # Health modifiers affecting illness chance
 ILLNESS_HEALTH_MULTIPLIERS: Dict[HealthStatus, float] = {
@@ -477,5 +477,114 @@ RECOMMENDED_STARTING_PURCHASES = {
 # Auto-advance defaults
 # ---------------------------------------------------------------------------
 DEFAULT_AUTO_ADVANCE_INTERVAL = 15  # seconds
-DEFAULT_DECISION_TIMEOUT_AUTO = 10   # seconds when auto-advancing
+DEFAULT_DECISION_TIMEOUT_AUTO = 45   # seconds when auto-advancing
 DEFAULT_DECISION_TIMEOUT_PAUSED = 60  # seconds when host has paused
+
+# ---------------------------------------------------------------------------
+# Era-appropriate NPC names (1840s United States)
+# ---------------------------------------------------------------------------
+NPC_MALE_NAMES = [
+    "John", "William", "James", "George", "Charles", "Henry", "Joseph", "Thomas",
+    "Samuel", "David", "Benjamin", "Daniel", "Robert", "Edward", "Andrew", "Jacob",
+    "Nathaniel", "Elijah", "Isaac", "Abraham", "Joshua", "Matthew", "Christopher",
+    "Nathan", "Jonathan", "Noah", "Aaron", "Adam", "Alexander", "Allen", "Ambrose",
+    "Amos", "Anthony", "Archibald", "Asa", "Augustus", "Avery", "Barnabas", "Bartholomew",
+    "Caleb", "Calvin", "Chester", "Clarence", "Clement", "Cornelius", "Cyrus", "Darius",
+    "Dennis", "Dudley", "Eben", "Ebenezer", "Edgar", "Edmund", "Elias", "Ellis",
+    "Elmer", "Emmett", "Enoch", "Ephraim", "Erastus", "Ezekiel", "Ezra", "Fletcher",
+    "Francis", "Franklin", "Frederick", "Gideon", "Gilbert", "Harrison", "Harvey",
+    "Hiram", "Homer", "Horace", "Horatio", "Hosea", "Howard", "Hubert", "Hudson",
+    "Hugh", "Hyrum", "Ira", "Irving", "Jasper", "Jedediah", "Jefferson", "Jeremiah",
+    "Jesse", "Josiah", "Jotham", "Lafayette", "Lemuel", "Leonard", "Levi", "Lewis",
+    "Linus", "Lorenzo", "Luther", "Martin", "Melville", "Merritt", "Micajah", "Miles",
+    "Milford", "Milton", "Monroe", "Mordecai", "Moses", "Nehemiah", "Nelson", "Newton",
+    "Obadiah", "Oliver", "Orlando", "Orson", "Oscar", "Otis", "Owen", "Parley",
+    "Perry", "Phineas", "Reuben", "Roderick", "Roscoe", "Rufus", "Sampson", "Seth",
+    "Seymour", "Silas", "Simeon", "Solomon", "Thaddeus", "Theodore", "Titus", "Tobias",
+    "Ulysses", "Uriah", "Vernon", "Virgil", "Wallace", "Ward", "Warren", "Washington",
+    "Wesley", "Wilbur", "Wiley", "Willard", "Wilson", "Winfield", "Zachariah", "Zebulon",
+]
+
+NPC_FEMALE_NAMES = [
+    "Mary", "Elizabeth", "Sarah", "Margaret", "Martha", "Catherine", "Ann", "Jane",
+    "Emily", "Harriet", "Charlotte", "Frances", "Susan", "Rebecca", "Lucy", "Nancy",
+    "Lydia", "Hannah", "Rachel", "Esther", "Abigail", "Ruth", "Alice", "Clara",
+    "Ella", "Florence", "Grace", "Helen", "Ida", "Julia", "Laura", "Lillian",
+    "Mabel", "Nellie", "Olive", "Pearl", "Rose", "Stella", "Theresa", "Victoria",
+    "Ada", "Agnes", "Amanda", "Amelia", "Angeline", "Augusta", "Aurelia", "Belinda",
+    "Belle", "Bertha", "Betsy", "Cecilia", "Celia", "Christina", "Cindy", "Clementine",
+    "Cordelia", "Cornelia", "Daisy", "Delia", "Della", "Dinah", "Dolly", "Dorcas",
+    "Dorothy", "Edith", "Eleanor", "Eliza", "Ellen", "Elsie", "Emeline", "Emma",
+    "Emmeline", "Estelle", "Ethel", "Eunice", "Eveline", "Fanny", "Fern", "Geneva",
+    "Genevieve", "Georgiana", "Gertrude", "Gladys", "Gloria", "Hattie", "Henrietta",
+    "Hester", "Hilda", "Hortense", "Inez", "Irene", "Iris", "Isabella", "Jeanette",
+    "Jemima", "Jenny", "Josephine", "Josie", "Juanita", "Katherine", "Keziah", "Lavinia",
+    "Leah", "Lena", "Letitia", "Lorena", "Lottie", "Louisa", "Lucretia", "Lydia",
+    "Mae", "Mahala", "Malinda", "Marcy", "Maria", "Marion", "Marjorie", "Martha",
+    "Mattie", "Melinda", "Melissa", "Melvina", "Minerva", "Minnie", "Miranda", "Myra",
+    "Nancy", "Naomi", "Narcissa", "Nettie", "Nora", "Norma", "Octavia", "Ophelia",
+    "Orpha", "Pansy", "Patience", "Pauline", "Permelia", "Persis", "Phoebe", "Polly",
+    "Priscilla", "Prudence", "Roxana", "Ruth", "Sabrina", "Selma", "Serena", "Sophronia",
+    "Submit", "Susanna", "Sybil", "Sylvia", "Tabitha", "Theodora", "Tillie", "Tryphena",
+    "Unity", "Ursula", "Veronica", "Vesta", "Violet", "Virginia", "Wilhelmina", "Winifred",
+    "Zelda", "Zilpah", "Zina", "Zora",
+]
+
+# ---------------------------------------------------------------------------
+# Historical Wagon Party Names
+# ---------------------------------------------------------------------------
+HISTORICAL_WAGON_NAMES = [
+    "The Bidwell-Bartleson Party", "The Peoria Party", "The Great Emigration", 
+    "The White-Hastings Party", "The Stephens-Townsend-Murphy Party", "The Barlow Road Pioneers", 
+    "The Columbia River Company", "The Independent Colony", "The Pioneer Line", 
+    "The Peoria Pioneers", "The Oregon Dragoons", "The Western Emigration Society", 
+    "The Platte River Travelers", "The Willamette Wayfarers", "The Prairie Schooners", 
+    "The Overland Company", "The Frontier Fellowship", "The Pacific Trailblazers", 
+    "The Columbia Basin Pioneers", "The Snake River Settlers", "The Applegate Trail Party", 
+    "The Green River Company", "The California Bound Company", "The Mormon Battalion", 
+    "The Missouri River Emigrants", "The Salt Lake City Pioneers", "The Independence Wayfarers", 
+    "The Blue Mountain Travelers", "The Council Bluffs Company", "The St. Joseph Pioneers", 
+    "The Sweetwater Company", "The Fort Laramie Travelers", "The Great Plains Emigrants", 
+    "The South Pass Wayfarers", "The Rocky Mountain Pioneers", "The Platte Valley Settlers", 
+    "The Willamette Settlers", "The Continental Divide Company", "The Fort Hall Emigrants", 
+    "The Columbia Gorge Travelers"
+]
+
+
+# ---------------------------------------------------------------------------
+# Swear word / profanity filter
+# ---------------------------------------------------------------------------
+SWEAR_WORDS = {
+    "ass", "asshole", "bastard", "bitch", "bullshit", "cock", "crap", "cum", "cunt",
+    "damn", "dick", "dildo", "dipshit", "douche", "fag", "faggot", "fuck", "fucked",
+    "fucker", "fucking", "goddamn", "hell", "jackass", "jerkoff", "motherfucker",
+    "nigger", "piss", "prick", "pussy", "shit", "shitty", "slut", "tits", "twat",
+    "whore", "wanker", "retard", "nigga", "chink", "spic", "kike", "wetback",
+}
+
+def contains_swear(text: str) -> bool:
+    """Check if text contains any swear words (case-insensitive, word-boundary aware)."""
+    import re
+    lower = text.lower()
+    # Also check for common leet substitutions
+    normalized = lower.replace("0", "o").replace("1", "i").replace("3", "e").replace("4", "a").replace("5", "s").replace("7", "t").replace("$", "s")
+    words = re.findall(r"\b\w+\b", normalized)
+    for word in words:
+        if word in SWEAR_WORDS:
+            return True
+        # Check without repeated letters (e.g., "fuuuck" -> "fuck")
+        cleaned = re.sub(r"(.)\1+", r"\1", word)
+        if cleaned in SWEAR_WORDS:
+            return True
+    return False
+
+def filter_swear(text: str, replacement: str = "[censored]") -> str:
+    """Replace swear words in text with a replacement string."""
+    import re
+    result = text
+    lower = text.lower()
+    normalized = lower.replace("0", "o").replace("1", "i").replace("3", "e").replace("4", "a").replace("5", "s").replace("7", "t").replace("$", "s")
+    for word in SWEAR_WORDS:
+        pattern = re.compile(re.escape(word), re.IGNORECASE)
+        result = pattern.sub(replacement, result)
+    return result

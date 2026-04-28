@@ -33,11 +33,7 @@
                     <label for="player-name">WHAT IS YOUR NAME?</label>
                     <input type="text" id="player-name" class="terminal-input" maxlength="20" autocomplete="off">
                 </div>
-                <div class="input-group">
-                    <label for="session-code">SESSION CODE (optional)</label>
-                    <input type="text" id="session-code" class="terminal-input" maxlength="4" autocomplete="off">
-                </div>
-                <button id="btn-join" class="terminal-btn">PRESS ENTER TO BEGIN</button>
+                <button id="btn-join" class="terminal-btn" style="margin-top: 1rem;">PRESS ENTER TO BEGIN</button>
                 <p id="join-error" class="error-text"></p>
             </div>
         </section>
@@ -53,6 +49,49 @@
                     <ul id="lobby-members" class="member-list"></ul>
                 </div>
                 <p class="status-msg">Waiting for the teacher to start the game...</p>
+            </div>
+        </section>
+
+        <!-- SCREEN: Outfitting -->
+        <section id="screen-outfitting" class="screen" hidden>
+            <div class="screen-content" style="justify-content: flex-start; padding-top: 1rem; max-width: 700px;">
+                <h1>OUTFIT YOUR WAGON</h1>
+                <p class="status-msg">The captain must choose a profession and buy supplies before departing.</p>
+
+                <div class="lobby-panel" style="width: 100%; margin-bottom: 1rem;">
+                    <h3>1. PARTY NAME</h3>
+                    <input type="text" id="outfit-party-name" class="terminal-input" placeholder="Enter party name..." maxlength="30" style="width: 100%; margin-bottom: 0.5rem;">
+                </div>
+
+                <div class="lobby-panel" style="width: 100%; margin-bottom: 1rem;">
+                    <h3>2. CHOOSE PROFESSION</h3>
+                    <div id="profession-selector" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
+                        <button class="terminal-btn profession-btn" data-prof="Banker from Boston" style="flex: 1; min-width: 150px;">
+                            <strong>Banker</strong><br><small>$1,600 · Score ×1</small>
+                        </button>
+                        <button class="terminal-btn profession-btn" data-prof="Carpenter from Ohio" style="flex: 1; min-width: 150px;">
+                            <strong>Carpenter</strong><br><small>$800 · Score ×2</small>
+                        </button>
+                        <button class="terminal-btn profession-btn" data-prof="Farmer from Illinois" style="flex: 1; min-width: 150px;">
+                            <strong>Farmer</strong><br><small>$400 · Score ×3</small>
+                        </button>
+                    </div>
+                    <p id="profession-selected" class="status-msg">No profession selected</p>
+                </div>
+
+                <div class="lobby-panel" style="width: 100%; margin-bottom: 1rem;">
+                    <h3>2. BUY SUPPLIES</h3>
+                    <div id="store-items" style="display: flex; flex-direction: column; gap: 0.3rem;">
+                        <!-- Populated by JS -->
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--term-border);">
+                        <span>Money remaining:</span>
+                        <span id="store-money" class="highlight">$0</span>
+                    </div>
+                </div>
+
+                <button id="btn-outfit-ready" class="terminal-btn" disabled>READY TO DEPART</button>
+                <p id="outfit-status" class="status-msg"></p>
             </div>
         </section>
 
@@ -92,6 +131,15 @@
                     <div class="panel" id="leaderboard-panel">
                         <h3>ALL PARTIES</h3>
                         <ul id="leaderboard" class="info-list"></ul>
+                    </div>
+                    <div class="panel" id="captain-panel" hidden>
+                        <h3>CAPTAIN'S CALL</h3>
+                        <p style="font-size: 0.85rem;">Call a party vote at any time:</p>
+                        <div style="display: flex; flex-direction: column; gap: 0.3rem;">
+                            <button id="btn-call-pace" class="terminal-btn" style="min-width: auto; font-size: 0.85rem; padding: 0.3rem 0.5rem;">Vote: Pace / Rations</button>
+                            <button id="btn-call-hunt" class="terminal-btn" style="min-width: auto; font-size: 0.85rem; padding: 0.3rem 0.5rem;">Vote: Go Hunt</button>
+                            <button id="btn-call-rest" class="terminal-btn" style="min-width: auto; font-size: 0.85rem; padding: 0.3rem 0.5rem;">Vote: Rest Day</button>
+                        </div>
                     </div>
                 </aside>
             </div>

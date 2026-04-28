@@ -166,7 +166,51 @@ class PartyEngine:
         death_events = self._check_deaths(party, players, global_date)
         events.extend(death_events)
 
-        # 6. Check landmark arrival
+        # 6. Check for nearby tombstones from other parties
+        tombstone_events = self._check_tombstone_proximity(party)
+        events.extend(tombstone_events)
+
+        # 7. Periodic travel decisions (every 5 days of travel)
+        if miles_today > 0 and not party.decision_pending:
+            party.travel_days_since_decision += 1
+            if party.travel_days_since_decision >= 5:
+                party.travel_days_since_decision = 0
+                party.status = "decision"
+
+                # Alternate between travel actions and pace/rations review
+                decision_cycle = getattr(party, '_decision_cycle', 0)
+                party._decision_cycle = (decision_cycle + 1) % 3
+
+                if party._decision_cycle == 0:
+                    # Pace/rations review every 3rd decision (~10-15 days)
+                    party.decision_pending = Decision(
+                        party_id=party.party_id,
+                        decision_type=DecisionType.PACE,
+                        prompt=f"Current pace: {party.pace.value}. Current rations: {party.rations.value}. What would you like to change?",
+                        options=[
+                            "Keep pace and rations",
+                            "Speed up (increase pace)",
+                            "Slow down (decrease pace)",
+                            "Increase rations",
+                            "Decrease rations",
+                        ],
+                        captain_id=party.captain_id,
+                        captain_default="Keep pace and rations",
+                        timeout_seconds=45,
+                    )
+                else:
+                    # Regular travel decision: hunt, rest, or continue
+                    party.decision_pending = Decision(
+                        party_id=party.party_id,
+                        decision_type=DecisionType.REST,
+                        prompt="The trail stretches ahead. What would the party like to do?",
+                        options=["Continue on", "Hunt for food", "Rest for a day"],
+                        captain_id=party.captain_id,
+                        captain_default="Continue on",
+                        timeout_seconds=45,
+                    )
+
+        # 9. Check landmark arrival
         next_idx, next_lm = self._get_next_landmark(party.distance_traveled)
         party.miles_to_next = next_lm.miles_from_start - party.distance_traveled
         party.current_landmark_index = next_idx - 1 if next_idx > 0 else 0
@@ -189,6 +233,7 @@ class PartyEngine:
                 })
             elif next_lm.is_river:
                 party.status = "river_crossing"
+                party.travel_days_since_decision = 0
                 party.decision_pending = Decision(
                     party_id=party.party_id,
                     decision_type=DecisionType.RIVER_METHOD,
@@ -196,9 +241,11 @@ class PartyEngine:
                     options=["Ford the river", "Caulk the wagon", "Take a ferry", "Wait for better conditions"],
                     captain_id=party.captain_id,
                     captain_default="Ford the river",
+                    timeout_seconds=45,
                 )
             elif next_lm.is_fort:
                 party.status = "decision"
+                party.travel_days_since_decision = 0
                 party.decision_pending = Decision(
                     party_id=party.party_id,
                     decision_type=DecisionType.BUY_SUPPLIES,
@@ -206,9 +253,11 @@ class PartyEngine:
                     options=["Buy supplies", "Continue on"],
                     captain_id=party.captain_id,
                     captain_default="Continue on",
+                    timeout_seconds=45,
                 )
             else:
                 party.status = "decision"
+                party.travel_days_since_decision = 0
                 party.decision_pending = Decision(
                     party_id=party.party_id,
                     decision_type=DecisionType.REST,
@@ -216,6 +265,7 @@ class PartyEngine:
                     options=["Rest here", "Hunt for food", "Continue on"],
                     captain_id=party.captain_id,
                     captain_default="Continue on",
+                    timeout_seconds=45,
                 )
 
         # Check if all dead
@@ -232,6 +282,28 @@ class PartyEngine:
             party.score = self._calculate_score(party, players)
 
         return party, players, events
+
+    def _check_tombstone_proximity(self, party: Party) -> List[Dict[str, Any]]:
+        """Check if party is near tombstones from other parties. Returns visit events."""
+        events = []
+        # This is populated by session_manager before calling tick
+        global_tombstones = getattr(party, '_global_tombstones', [])
+        for ts in global_tombstones:
+            if ts.written_by_party_id == party.party_id:
+                continue
+            if party.party_id in ts.visited_by_party_ids:
+                continue
+            distance = abs(party.distance_traveled - ts.mile_marker)
+            if distance <= 5:
+                ts.visited_by_party_ids.append(party.party_id)
+                events.append({
+                    "type": "tombstone",
+                    "message": f"You pass a tombstone for {ts.player_name} of {ts.party_name}: \"{ts.epitaph}\" — died of {ts.cause} at mile {ts.mile_marker}.",
+                    "player_name": ts.player_name,
+                    "party_name": ts.party_name,
+                    "epitaph": ts.epitaph,
+                })
+        return events
 
     # ------------------------------------------------------------------
     # Travel
@@ -368,19 +440,21 @@ class PartyEngine:
                 msg += " Luckily, there was nothing to steal."
 
         elif event_id == "bad_water":
-            # Everyone loses some health
+            # 50% chance per member to lose health
             for pid in party.member_ids:
-                if players[pid].is_alive:
+                if players[pid].is_alive and self._roll_probability(0.5):
                     self._worsen_health(players[pid])
-            msg += " Everyone feels sick."
+            msg += " Some of the party feels sick."
 
         elif event_id == "lost_trail":
             # No travel today - handled by returning 0 miles, but we already traveled.
             # So instead, we consume extra food and take health penalty.
             party.inventory.food = max(0, party.inventory.food - 10)
-            for pid in party.member_ids:
-                if players[pid].is_alive:
-                    self._worsen_health(players[pid])
+            # One random member takes a health hit from the stress
+            alive_pids = [pid for pid in party.member_ids if players[pid].is_alive]
+            if alive_pids:
+                victim = self.rng.choice(alive_pids)
+                self._worsen_health(players[victim])
             msg += " You wasted a day searching."
 
         elif event_id == "find_wild_fruit":
@@ -399,8 +473,9 @@ class PartyEngine:
 
         elif event_id == "rough_trail":
             party.inventory.food = max(0, party.inventory.food - 5)
+            # 50% chance per member to be affected
             for pid in party.member_ids:
-                if players[pid].is_alive:
+                if players[pid].is_alive and self._roll_probability(0.5):
                     self._worsen_health(players[pid])
             msg += " The rough going has exhausted the party."
 
@@ -426,7 +501,7 @@ class PartyEngine:
         # Food shortage penalty
         food_penalty = 0
         if party.inventory.food <= 0:
-            food_penalty = -5
+            food_penalty = -2
 
         for pid in alive_members:
             player = players[pid]
@@ -437,15 +512,23 @@ class PartyEngine:
             total_impact += self.rng.randint(-1, 1)
 
             if total_impact < 0:
-                for _ in range(abs(total_impact)):
+                steps = min(abs(total_impact), 1)  # Cap daily health loss to max 1 step per day
+                for _ in range(steps):
                     self._worsen_health(player)
             elif total_impact > 0:
                 self._improve_health(player)
 
+            # Passive recovery: if conditions are decent, small chance to improve
+            if total_impact == 0 and player.health_status != HealthStatus.HEALTHY:
+                if self._roll_probability(0.3):
+                    self._improve_health(player)
+
             # Illness check
             if self._roll_illness(player, weather):
                 illness = self.rng.choice(ILLNESS_TYPES)
-                player.health_status = HealthStatus.VERY_POOR
+                # Illness worsens health by 2 steps instead of instantly dropping to VERY_POOR
+                self._worsen_health(player)
+                self._worsen_health(player)
                 events.append({
                     "type": "illness",
                     "player_id": pid,
@@ -511,21 +594,25 @@ class PartyEngine:
                     "dysentery", "exhaustion", "cholera", "measles",
                     "typhoid fever", "a snakebite", "starvation", "hypothermia"
                 ])
+                default_epitaph = f"Here lies {player.name}, who died of {cause}."
+                tombstone = Tombstone(
+                    player_name=player.name,
+                    party_name=party.party_name,
+                    mile_marker=party.distance_traveled,
+                    cause=cause,
+                    date=current_date,
+                    epitaph=default_epitaph,
+                    written_by_party_id=party.party_id,
+                )
+                party.tombstones.append(tombstone)
                 events.append({
                     "type": "death",
                     "player_id": pid,
                     "player_name": player.name,
                     "message": f"{player.name} has died of {cause}.",
                     "cause": cause,
+                    "tombstone_index": len(party.tombstones) - 1,
                 })
-                party.tombstones.append(Tombstone(
-                    player_name=player.name,
-                    party_name=party.party_name,
-                    mile_marker=party.distance_traveled,
-                    cause=cause,
-                    date=current_date,
-                    epitaph=f"Here lies {player.name}, who died of {cause}.",
-                ))
         return events
 
     # ------------------------------------------------------------------
@@ -548,6 +635,32 @@ class PartyEngine:
             if choice in pace_map:
                 party.pace = pace_map[choice]
                 events.append({"type": "decision", "message": f"Pace set to {choice}."})
+            elif choice == "Speed up (increase pace)":
+                if party.pace == Pace.STEADY:
+                    party.pace = Pace.STRENUOUS
+                elif party.pace == Pace.STRENUOUS:
+                    party.pace = Pace.GRUELING
+                events.append({"type": "decision", "message": f"Pace increased to {party.pace.value}."})
+            elif choice == "Slow down (decrease pace)":
+                if party.pace == Pace.GRUELING:
+                    party.pace = Pace.STRENUOUS
+                elif party.pace == Pace.STRENUOUS:
+                    party.pace = Pace.STEADY
+                events.append({"type": "decision", "message": f"Pace decreased to {party.pace.value}."})
+            elif choice == "Increase rations":
+                if party.rations == Rations.BARE_BONES:
+                    party.rations = Rations.MEAGER
+                elif party.rations == Rations.MEAGER:
+                    party.rations = Rations.FILLING
+                events.append({"type": "decision", "message": f"Rations increased to {party.rations.value}."})
+            elif choice == "Decrease rations":
+                if party.rations == Rations.FILLING:
+                    party.rations = Rations.MEAGER
+                elif party.rations == Rations.MEAGER:
+                    party.rations = Rations.BARE_BONES
+                events.append({"type": "decision", "message": f"Rations decreased to {party.rations.value}."})
+            elif choice == "Keep pace and rations":
+                events.append({"type": "decision", "message": "Pace and rations unchanged."})
 
         elif decision.decision_type == DecisionType.RATIONS:
             rations_map = {"Filling": Rations.FILLING, "Meager": Rations.MEAGER, "Bare Bones": Rations.BARE_BONES}
@@ -586,6 +699,13 @@ class PartyEngine:
             else:
                 party.status = "traveling"
 
+        elif decision.decision_type == DecisionType.VISIT_TOMBSTONE:
+            if choice == "Stop and pay respects":
+                events.append({"type": "tombstone", "message": "You stopped to pay your respects."})
+            else:
+                events.append({"type": "tombstone", "message": "You continued past the tombstone."})
+            party.status = "traveling"
+
         elif decision.decision_type == DecisionType.TAKE_SHORTCUT:
             if choice == "Take shortcut":
                 # Risk/reward shortcut
@@ -594,8 +714,9 @@ class PartyEngine:
                     events.append({"type": "decision", "message": "Shortcut saved time!"})
                 else:
                     party.distance_traveled = max(0, party.distance_traveled - 10)
+                    # 50% chance per member to be affected by the bad shortcut
                     for pid in party.member_ids:
-                        if players[pid].is_alive:
+                        if players[pid].is_alive and self._roll_probability(0.5):
                             self._worsen_health(players[pid])
                     events.append({"type": "decision", "message": "Shortcut was a dead end! Lost time and health."})
             else:
@@ -796,15 +917,16 @@ class PartyEngine:
     # ------------------------------------------------------------------
     # Outfit a new party
     # ------------------------------------------------------------------
-    def outfit_party(
-        self, party: Party, profession: Profession, purchases: Dict[str, int]
-    ) -> Tuple[Party, Dict[str, Any]]:
-        """Set up a party at the start of the game with profession and purchases."""
-        result = {"success": True, "message": "Party outfitted.", "errors": []}
-        party.profession = profession
+    def choose_profession(self, party: Party, profession: Profession) -> Party:
+        """Set the party's profession and starting money."""
         from game_data import PROFESSION_STARTING_MONEY
+        party.profession = profession
         party.inventory.money = PROFESSION_STARTING_MONEY[profession]
+        return party
 
+    def buy_starting_supplies(self, party: Party, purchases: Dict[str, int]) -> Tuple[Party, Dict[str, Any]]:
+        """Buy starting supplies at the Independence general store."""
+        result = {"success": True, "message": "Purchases applied.", "errors": []}
         for item, qty in purchases.items():
             if qty <= 0:
                 continue
@@ -812,9 +934,15 @@ class PartyEngine:
             if not buy_result["success"]:
                 result["success"] = False
                 result["errors"].append(buy_result["message"])
-
         if result["errors"]:
             result["message"] = "Some purchases failed."
+        return party, result
 
+    def outfit_party(
+        self, party: Party, profession: Profession, purchases: Dict[str, int]
+    ) -> Tuple[Party, Dict[str, Any]]:
+        """Set up a party at the start of the game with profession and purchases."""
+        party = self.choose_profession(party, profession)
+        party, result = self.buy_starting_supplies(party, purchases)
         party.status = "traveling"
         return party, result

@@ -30,6 +30,7 @@ class Player:
     socket_id: Optional[str] = None
     party_id: Optional[str] = None
     is_host: bool = False
+    is_npc: bool = False
     is_alive: bool = True
     health_status: HealthStatus = HealthStatus.HEALTHY
     profession: Profession = Profession.BANKER
@@ -42,6 +43,7 @@ class Player:
             "name": self.name,
             "party_id": self.party_id,
             "is_host": self.is_host,
+            "is_npc": self.is_npc,
             "is_alive": self.is_alive,
             "health_status": self.health_status.value,
             "profession": self.profession.value,
@@ -54,6 +56,7 @@ class Player:
             name=data["name"],
             party_id=data.get("party_id"),
             is_host=data.get("is_host", False),
+            is_npc=data.get("is_npc", False),
             is_alive=data.get("is_alive", True),
             health_status=HealthStatus(data.get("health_status", "Healthy")),
             profession=Profession(data.get("profession", "Banker from Boston")),
@@ -107,6 +110,8 @@ class DecisionType(Enum):
     TRADE_PARTY = "trade_party"
     TAKE_SHORTCUT = "take_shortcut"
     RACE = "race"
+    TOMBSTONE_EPITAPH = "tombstone_epitaph"
+    VISIT_TOMBSTONE = "visit_tombstone"
 
 
 @dataclass
@@ -175,6 +180,8 @@ class Tombstone:
     cause: str
     date: date
     epitaph: str = ""
+    written_by_party_id: str = ""
+    visited_by_party_ids: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -184,6 +191,8 @@ class Tombstone:
             "cause": self.cause,
             "date": self.date.isoformat(),
             "epitaph": self.epitaph,
+            "written_by_party_id": self.written_by_party_id,
+            "visited_by_party_ids": self.visited_by_party_ids,
         }
 
     @classmethod
@@ -195,6 +204,8 @@ class Tombstone:
             cause=data["cause"],
             date=date.fromisoformat(data["date"]) if "date" in data else date.today(),
             epitaph=data.get("epitaph", ""),
+            written_by_party_id=data.get("written_by_party_id", ""),
+            visited_by_party_ids=data.get("visited_by_party_ids", []),
         )
 
 
@@ -205,21 +216,23 @@ class Tombstone:
 class Party:
     """A wagon party of 1-4 players traveling the trail."""
     party_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
-    party_name: str = "Unnamed Party"
+    party_name: str = field(default_factory=lambda: __import__('random').choice(__import__('game_data').HISTORICAL_WAGON_NAMES))
     member_ids: List[str] = field(default_factory=list)
     captain_id: str = ""
     inventory: Inventory = field(default_factory=Inventory)
     profession: Profession = Profession.BANKER
     pace: Pace = Pace.STEADY
-    rations: Rations = Rations.MEAGER
+    rations: Rations = Rations.FILLING
     distance_traveled: int = 0  # miles
     current_landmark_index: int = 0
     miles_to_next: int = 0
     days_at_current_location: int = 0
+    travel_days_since_decision: int = 0
     is_resting: bool = False
     rest_days_remaining: int = 0
     global_date: Optional[date] = None
     status: str = "outfitting"  # outfitting, traveling, decision, hunting, river_crossing, resting, finished, dead
+    outfitting_complete: bool = False
     decision_pending: Optional[Decision] = None
     neighbor_party_ids: List[str] = field(default_factory=list)
     event_log: List[Dict[str, Any]] = field(default_factory=list)
@@ -246,9 +259,11 @@ class Party:
             "current_landmark_index": self.current_landmark_index,
             "miles_to_next": self.miles_to_next,
             "days_at_current_location": self.days_at_current_location,
+            "travel_days_since_decision": self.travel_days_since_decision,
             "is_resting": self.is_resting,
             "rest_days_remaining": self.rest_days_remaining,
             "status": self.status,
+            "outfitting_complete": self.outfitting_complete,
             "decision_pending": self.decision_pending.to_dict() if self.decision_pending else None,
             "neighbor_party_ids": self.neighbor_party_ids,
             "event_log": self.event_log[-20:] if self.event_log else [],  # Last 20 events
@@ -273,6 +288,8 @@ class Party:
             current_landmark_index=data.get("current_landmark_index", 0),
             miles_to_next=data.get("miles_to_next", 0),
             status=data.get("status", "outfitting"),
+            outfitting_complete=data.get("outfitting_complete", False),
+            travel_days_since_decision=data.get("travel_days_since_decision", 0),
         )
         if "inventory" in data:
             party.inventory = Inventory.from_dict(data["inventory"])
