@@ -215,40 +215,74 @@ function showDecision(decision, myPlayerId, captainId) {
     currentDecision = decision;
     els.decisionPanel.hidden = false;
     els.actionPanel.hidden = true;
-    els.decisionPrompt.textContent = decision.prompt || 'WHAT IS YOUR CHOICE?';
+    els.decisionPrompt.textContent = decision.prompt || 'DECISION:';
     els.choices.innerHTML = '';
 
     const isDead = !lastState.players[myPlayerId]?.is_alive;
 
-    decision.options.forEach(opt => {
-        const btn = document.createElement('button');
-        btn.className = 'choice-btn';
-        btn.textContent = opt;
-        btn.disabled = isDead;
+    // Display options as a numbered list
+    const ul = document.createElement('ul');
+    ul.style.listStyleType = 'none';
+    ul.style.padding = '0';
+    ul.style.margin = '0 0 1rem 0';
+    
+    decision.options.forEach((opt, idx) => {
+        const li = document.createElement('li');
+        li.textContent = `${idx + 1}. ${opt}`;
+        li.style.marginBottom = '0.5rem';
         if (decision.votes && decision.votes[myPlayerId] === opt) {
-            btn.classList.add('voted');
+            li.style.color = 'var(--term-highlight)';
         }
-        btn.onclick = () => {
-            window.dispatchEvent(new CustomEvent('vote-submitted', {
-                detail: { decision_id: decision.decision_id, choice: opt }
-            }));
-            btn.classList.add('voted');
-        };
-        els.choices.appendChild(btn);
+        ul.appendChild(li);
     });
+    els.choices.appendChild(ul);
+    
+    // Add input field for typing choice
+    const inputWrapper = document.createElement('div');
+    inputWrapper.style.display = 'flex';
+    inputWrapper.style.alignItems = 'center';
+    inputWrapper.style.gap = '0.5rem';
+    
+    const label = document.createElement('span');
+    label.textContent = "What is your choice?";
+    
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = 1;
+    input.max = decision.options.length;
+    input.className = 'terminal-input';
+    input.style.width = '4rem';
+    input.disabled = isDead || (decision.votes && decision.votes[myPlayerId]);
+    
+    input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            const val = parseInt(input.value, 10);
+            if (val >= 1 && val <= decision.options.length) {
+                const opt = decision.options[val - 1];
+                window.dispatchEvent(new CustomEvent('vote-submitted', {
+                    detail: { decision_id: decision.decision_id, choice: opt }
+                }));
+                input.disabled = true;
+            }
+        }
+    });
+    
+    inputWrapper.appendChild(label);
+    inputWrapper.appendChild(input);
+    els.choices.appendChild(inputWrapper);
 
     // Captain override dropdown
     if (myPlayerId === captainId && !isDead) {
         const overrideLabel = document.createElement('div');
-        overrideLabel.style.cssText = 'width: 100%; font-size: 0.9rem; margin-top: 0.3rem; opacity: 0.8;';
+        overrideLabel.style.cssText = 'width: 100%; font-size: 0.9rem; margin-top: 1rem; opacity: 0.8;';
         overrideLabel.textContent = 'CAPTAIN DEFAULT: ';
         const sel = document.createElement('select');
         sel.className = 'terminal-input';
         sel.style.cssText = 'width: auto; display: inline-block; margin-left: 0.3rem;';
-        decision.options.forEach(opt => {
+        decision.options.forEach((opt, idx) => {
             const option = document.createElement('option');
             option.value = opt;
-            option.textContent = opt;
+            option.textContent = `${idx + 1}. ${opt}`;
             if (decision.captain_default === opt) option.selected = true;
             sel.appendChild(option);
         });
@@ -263,6 +297,10 @@ function showDecision(decision, myPlayerId, captainId) {
 
     startDecisionTimer(decision);
     updateDecisionVotes(decision, myPlayerId);
+    
+    if (!input.disabled) {
+        setTimeout(() => input.focus(), 0);
+    }
 }
 
 function updateDecisionVotes(decision, myPlayerId) {
@@ -271,12 +309,11 @@ function updateDecisionVotes(decision, myPlayerId) {
         counts[v] = (counts[v] || 0) + 1;
     });
 
-    const buttons = els.choices.querySelectorAll('.choice-btn');
-    buttons.forEach(btn => {
-        const count = counts[btn.textContent] || 0;
-        if (count > 0) {
-            btn.textContent = `${btn.textContent.split(' (')[0]} (${count})`;
-        }
+    const items = els.choices.querySelectorAll('li');
+    items.forEach((li, idx) => {
+        const opt = decision.options[idx];
+        const count = counts[opt] || 0;
+        li.textContent = `${idx + 1}. ${opt}${count > 0 ? ` (${count} votes)` : ''}`;
     });
 }
 
@@ -437,18 +474,28 @@ function renderOutfittingScreen(state, myPlayerId) {
         });
     }
 
-    // Profession buttons (enabled until money is set, since profession defaults to Banker)
+    // Profession selection (enabled until money is set)
     const hasProfession = party.inventory && party.inventory.money > 0;
-    document.querySelectorAll('.profession-btn').forEach(btn => {
-        btn.disabled = !isCaptain || hasProfession;
-        btn.style.opacity = btn.disabled ? '0.5' : '1';
-        btn.onclick = () => {
-            if (!isCaptain) return;
-            window.dispatchEvent(new CustomEvent('choose-profession', {
-                detail: { party_id: party.party_id, profession: btn.dataset.prof }
-            }));
-        };
-    });
+    const profInput = document.getElementById('profession-input');
+    if (profInput) {
+        profInput.disabled = !isCaptain || hasProfession;
+        // Only add listener if not already added to avoid duplicates
+        if (!profInput.dataset.wired) {
+            profInput.dataset.wired = "true";
+            profInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    if (!isCaptain || hasProfession) return;
+                    const val = parseInt(profInput.value, 10);
+                    const profs = ["Banker from Boston", "Carpenter from Ohio", "Farmer from Illinois"];
+                    if (val >= 1 && val <= 3) {
+                        window.dispatchEvent(new CustomEvent('choose-profession', {
+                            detail: { party_id: party.party_id, profession: profs[val - 1] }
+                        }));
+                    }
+                }
+            });
+        }
+    }
 
     // Ready button
     if (readyBtn) {

@@ -65,16 +65,16 @@
 
                 <div class="lobby-panel" style="width: 100%; margin-bottom: 1rem;">
                     <h3>2. CHOOSE PROFESSION</h3>
-                    <div id="profession-selector" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
-                        <button class="terminal-btn profession-btn" data-prof="Banker from Boston" style="flex: 1; min-width: 150px;">
-                            <strong>Banker</strong><br><small>$1,600 · Score ×1</small>
-                        </button>
-                        <button class="terminal-btn profession-btn" data-prof="Carpenter from Ohio" style="flex: 1; min-width: 150px;">
-                            <strong>Carpenter</strong><br><small>$800 · Score ×2</small>
-                        </button>
-                        <button class="terminal-btn profession-btn" data-prof="Farmer from Illinois" style="flex: 1; min-width: 150px;">
-                            <strong>Farmer</strong><br><small>$400 · Score ×3</small>
-                        </button>
+                    <div id="profession-selector" style="margin-bottom: 1rem;">
+                        <ul style="list-style-type: none; padding: 0; margin: 0 0 0.5rem 0;">
+                            <li>1. Be a banker from Boston</li>
+                            <li>2. Be a carpenter from Ohio</li>
+                            <li>3. Be a farmer from Illinois</li>
+                        </ul>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span>What is your choice?</span>
+                            <input type="number" id="profession-input" class="terminal-input" min="1" max="3" style="width: 4rem;">
+                        </div>
                     </div>
                     <p id="profession-selected" class="status-msg">No profession selected</p>
                 </div>
