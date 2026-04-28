@@ -40,7 +40,7 @@ const keys = {
 // ------------------------------------------------------------------
 // Retro Assets (1 = pixel, space = empty)
 // ------------------------------------------------------------------
-const PIXEL_SIZE = 4;
+const PIXEL_SIZE = 8;
 const TERM_GREEN = '#4af626';
 
 const SPRITES = {
@@ -214,7 +214,7 @@ function gameLoop() {
     updateGameLogic();
     render();
     
-    if (remaining <= 0 || bulletsLeft <= 0) {
+    if (remaining <= 0) {
         finishHunt();
     } else {
         requestAnimationFrame(gameLoop);
