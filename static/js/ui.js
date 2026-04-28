@@ -2,6 +2,8 @@
  * Player UI — screen management, DOM rendering, decision handling.
  */
 
+import * as Effects from './effects.js';
+
 const screens = {
     join: document.getElementById('screen-join'),
     lobby: document.getElementById('screen-lobby'),
@@ -124,6 +126,29 @@ function updateGame(state, myPlayerId) {
         }
     });
     els.statHealth.textContent = worstHealth;
+    els.statHealth.className = 'highlight ' + Effects.getHealthClass(worstHealth);
+    
+    // Status Bar Weather Styling
+    els.statWeather.className = 'highlight ' + Effects.getWeatherClass(state.global_weather);
+    
+    // Food Warning
+    const food = party.inventory ? party.inventory.food : 0;
+    if (food <= 0) {
+        els.statFood.className = 'highlight stat-food-critical';
+    } else {
+        els.statFood.className = 'highlight';
+    }
+
+    // Animation Management
+    if (party.status === 'traveling' && !party.decision_pending) {
+        Effects.startTravelAnimation(party.distance_traveled);
+        Effects.startAmbientMessages();
+        Effects.startWeatherEffect(state.global_weather);
+    } else {
+        Effects.stopTravelAnimation();
+        Effects.stopAmbientMessages();
+        Effects.stopWeatherEffect();
+    }
 
     // Party members
     els.partyMembers.innerHTML = '';
@@ -319,6 +344,7 @@ function updateDecisionVotes(decision, myPlayerId) {
 
 function startDecisionTimer(decision) {
     if (decisionTimerInterval) clearInterval(decisionTimerInterval);
+    Effects.resetDecisionTimerBar();
 
     const timeout = decision.timeout_seconds || 10;
     const created = new Date(decision.created_at);
@@ -326,8 +352,12 @@ function startDecisionTimer(decision) {
 
     function update() {
         const now = new Date();
-        const remaining = Math.max(0, Math.ceil((endTime - now) / 1000));
+        const diffMs = endTime - now;
+        const remaining = Math.max(0, Math.ceil(diffMs / 1000));
         els.decisionTimer.textContent = `Time remaining: ${remaining}s`;
+        
+        Effects.updateDecisionTimerBar(Math.max(0, diffMs / 1000), timeout);
+
         if (remaining <= 0) {
             clearInterval(decisionTimerInterval);
             hideDecision();
@@ -335,7 +365,7 @@ function startDecisionTimer(decision) {
     }
 
     update();
-    decisionTimerInterval = setInterval(update, 1000);
+    decisionTimerInterval = setInterval(update, 100); // Higher frequency for smooth bar
 }
 
 function hideDecision() {
@@ -393,85 +423,147 @@ function renderOutfittingScreen(state, myPlayerId) {
     if (!party) return;
 
     const isCaptain = party.captain_id === myPlayerId;
-    const professionEl = document.getElementById('profession-selected');
-    const storeItemsEl = document.getElementById('store-items');
-    const moneyEl = document.getElementById('store-money');
-    const readyBtn = document.getElementById('btn-outfit-ready');
-    const statusEl = document.getElementById('outfit-status');
-
-    // Party name input
-    const nameInput = document.getElementById('outfit-party-name');
-    if (nameInput) {
-        nameInput.value = party.party_name || '';
-        nameInput.disabled = !isCaptain || party.outfitting_complete;
-        nameInput.onchange = () => {
-            if (!isCaptain) return;
-            window.dispatchEvent(new CustomEvent('set-party-name', {
-                detail: { party_id: party.party_id, name: nameInput.value.trim() }
-            }));
-        };
-    }
-
-    // Profession display
-    const profMap = {
-        'Banker from Boston': 'Banker ($1,600)',
-        'Carpenter from Ohio': 'Carpenter ($800)',
-        'Farmer from Illinois': 'Farmer ($400)',
-    };
-    const hasProf = party.inventory && party.inventory.money > 0;
-    const profName = hasProf ? (party.profession || 'Unknown') : 'Not selected';
-    professionEl.textContent = profMap[profName] || profName;
-
-    // Money display
-    const money = party.inventory ? party.inventory.money : 0;
-    moneyEl.textContent = `$${Math.round(money * 100) / 100}`;
-
-    // Store items
-    const prices = {
-        oxen: 40,
-        food: 0.10,
-        clothing: 10,
-        bullets: 2,
-        wagon_wheel: 10,
-        wagon_axle: 10,
-        wagon_tongue: 10,
-    };
-    const labels = {
-        oxen: 'Oxen (yoke)',
-        food: 'Food (lbs)',
-        clothing: 'Clothing (sets)',
-        bullets: 'Bullets (boxes of 20)',
-        wagon_wheel: 'Wagon Wheels',
-        wagon_axle: 'Wagon Axles',
-        wagon_tongue: 'Wagon Tongues',
-    };
-
-    if (storeItemsEl && storeItemsEl.children.length === 0) {
-        Object.entries(prices).forEach(([item, price]) => {
-            const row = document.createElement('div');
-            row.style.cssText = 'display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;';
-            row.innerHTML = `
-                <span style="flex: 1;">${labels[item]} — $${price} each</span>
-                <input type="number" class="terminal-input store-qty" data-item="${item}" value="0" min="0" style="width: 60px; text-align: center;" ${isCaptain ? '' : 'disabled'}>
-                <button class="terminal-btn store-buy" data-item="${item}" data-price="${price}" style="min-width: auto; font-size: 0.85rem; padding: 0.2rem 0.5rem;" ${isCaptain ? '' : 'disabled'}>BUY</button>
-            `;
-            storeItemsEl.appendChild(row);
-        });
-
-        // Wire up buy buttons (once)
-        storeItemsEl.querySelectorAll('.store-buy').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const item = btn.dataset.item;
-                const qtyInput = storeItemsEl.querySelector(`.store-qty[data-item="${item}"]`);
-                const qty = parseInt(qtyInput.value, 10) || 0;
-                if (qty > 0) {
-                    window.dispatchEvent(new CustomEvent('buy-supplies', {
-                        detail: { party_id: party.party_id, item, quantity: qty }
-                    }));
-                    qtyInput.value = '0';
+    
+    const partyNameInput = document.getElementById('outfit-party-name');
+    if (partyNameInput) {
+        if (!partyNameInput.dataset.wired) {
+            partyNameInput.dataset.wired = "true";
+            partyNameInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    if (!isCaptain) return;
+                    const name = partyNameInput.value.trim();
+                    if (name) {
+                        window.dispatchEvent(new CustomEvent('set-party-name', {
+                            detail: { party_id: party.party_id, name: name }
+                        }));
+                        partyNameInput.blur();
+                    }
                 }
             });
-        });
+        }
+        partyNameInput.disabled = !isCaptain;
+        if (party.party_name !== partyNameInput.value && document.activeElement !== partyNameInput) {
+            partyNameInput.value = party.party_name || "";
+        }
+    }
+
+    const professionEl = document.getElementById('profession-selected');
+    if (professionEl) {
+        if (party.inventory && party.inventory.money > 0) {
+            professionEl.textContent = `Selected: ${party.profession || 'Unknown'}`;
+        } else {
+            professionEl.textContent = 'No profession selected';
+        }
+    }
+
+    // Store logic
+    const storePanel = document.getElementById('outfitting-store-panel');
+    const storeFunds = document.getElementById('store-funds');
+    const storeMainInput = document.getElementById('store-main-input');
+    const storeBuyContainer = document.getElementById('store-buy-container');
+    const storeMainGroup = document.getElementById('store-main-input-group');
+    const storeBuyPrompt = document.getElementById('store-buy-prompt');
+    const storeBuyInput = document.getElementById('store-buy-input');
+    const readyBtn = document.getElementById('btn-outfit-ready');
+
+    if (storePanel) {
+        const hasProfession = party.inventory && party.inventory.money > 0;
+        storePanel.hidden = !hasProfession;
+        if (storeFunds) storeFunds.textContent = Math.round((party.inventory ? party.inventory.money : 0) * 100) / 100;
+        
+        if (readyBtn) {
+            readyBtn.disabled = !isCaptain || !hasProfession || party.outfitting_complete;
+            readyBtn.onclick = () => {
+                window.dispatchEvent(new CustomEvent('party-ready', {
+                    detail: { party_id: party.party_id }
+                }));
+            };
+        }
+
+        const itemsKeys = ['oxen', 'food', 'clothing', 'bullets', 'wagon_wheel', 'wagon_axle', 'wagon_tongue'];
+        const labels = {
+            oxen: 'yoke of oxen',
+            food: 'pounds of food',
+            clothing: 'sets of clothes',
+            bullets: 'boxes of bullets',
+            wagon_wheel: 'wagon wheels',
+            wagon_axle: 'wagon axles',
+            wagon_tongue: 'wagon tongues',
+        };
+        
+        if (storeMainInput && !storeMainInput.dataset.wired) {
+            storeMainInput.dataset.wired = "true";
+            
+            // Re-disable inputs if not captain
+            storeMainInput.disabled = !isCaptain;
+            storeBuyInput.disabled = !isCaptain;
+            
+            storeMainInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    if (!isCaptain) return;
+                    const val = parseInt(storeMainInput.value, 10);
+                    if (val >= 1 && val <= 7) {
+                        const itemKey = itemsKeys[val - 1];
+                        storeMainGroup.hidden = true;
+                        storeBuyContainer.hidden = false;
+                        storeBuyPrompt.textContent = `How many ${labels[itemKey]} do you want?`;
+                        storeBuyInput.value = '';
+                        storeBuyInput.dataset.itemKey = itemKey;
+                        storeBuyInput.focus();
+                    }
+                }
+            });
+            
+            storeBuyInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    if (!isCaptain) return;
+                    const qty = parseInt(storeBuyInput.value, 10) || 0;
+                    if (qty > 0) {
+                        window.dispatchEvent(new CustomEvent('buy-supplies', {
+                            detail: { party_id: party.party_id, item: storeBuyInput.dataset.itemKey, quantity: qty }
+                        }));
+                    }
+                    storeBuyContainer.hidden = true;
+                    storeMainGroup.hidden = false;
+                    storeMainInput.value = '';
+                    storeMainInput.focus();
+                }
+            });
+        }
+    }
+
+    // Month of Departure
+    const monthPanel = document.getElementById('outfitting-month-panel');
+    const monthInput = document.getElementById('month-input');
+    const monthSelected = document.getElementById('month-selected');
+    const monthNames = ['March', 'April', 'May', 'June', 'July'];
+    
+    if (monthPanel) {
+        const hasProfession = party.inventory && party.inventory.money > 0;
+        monthPanel.hidden = !hasProfession;
+        
+        if (party.start_month) {
+            monthSelected.textContent = `Selected: ${monthNames[party.start_month - 3] || 'Unknown'}`;
+        }
+        
+        if (monthInput && !monthInput.dataset.wired) {
+            monthInput.dataset.wired = "true";
+            monthInput.disabled = !isCaptain;
+            
+            monthInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    if (!isCaptain) return;
+                    const val = parseInt(monthInput.value, 10);
+                    if (val >= 1 && val <= 5) {
+                        const actualMonth = val + 2; // 1=March(3), 5=July(7)
+                        window.dispatchEvent(new CustomEvent('choose-month', {
+                            detail: { party_id: party.party_id, month: actualMonth }
+                        }));
+                        monthInput.value = '';
+                    }
+                }
+            });
+        }
     }
 
     // Profession selection (enabled until money is set)
@@ -497,23 +589,15 @@ function renderOutfittingScreen(state, myPlayerId) {
         }
     }
 
-    // Ready button
-    if (readyBtn) {
-        readyBtn.disabled = !isCaptain || !hasProfession || party.outfitting_complete;
-        readyBtn.onclick = () => {
-            window.dispatchEvent(new CustomEvent('party-ready', {
-                detail: { party_id: party.party_id }
-            }));
-        };
-    }
-
+    const statusEl = document.getElementById('outfit-status');
     if (statusEl) {
+        const hasProfession = party.inventory && party.inventory.money > 0;
         if (!isCaptain) {
             statusEl.textContent = 'Waiting for the captain to finish outfitting...';
         } else if (party.outfitting_complete) {
             statusEl.textContent = 'Your party is ready to depart!';
         } else {
-            statusEl.textContent = 'Choose a profession and buy supplies, then click READY.';
+            statusEl.textContent = hasProfession ? 'Buy supplies for the trail, then type your choice to depart.' : 'Choose a profession to begin.';
         }
     }
 }

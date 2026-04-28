@@ -5,10 +5,12 @@
 import * as Network from './network.js';
 import * as UI from './ui.js';
 import * as Hunting from './hunting.js';
+import * as Effects from './effects.js';
 
 let myPlayerId = null;
 let myPartyId = null;
 let lastState = null;
+let hasBooted = false;
 
 // ------------------------------------------------------------------
 // Init
@@ -24,11 +26,33 @@ Network.on('onDisconnect', (reason) => {
 });
 
 Network.on('onSessionState', (state) => {
-    handleStateUpdate(state);
+    if (!hasBooted && state.game_status !== 'lobby') {
+        hasBooted = true;
+        Effects.playCRTBoot(() => {
+            handleStateUpdate(state);
+        });
+    } else {
+        handleStateUpdate(state);
+    }
 });
 
 Network.on('onEventOccurred', (event) => {
     UI.addEventToLog(event);
+    
+    // Trigger Visual Effects
+    if (event.type === 'death') {
+        Effects.flashScreen('danger', 1000);
+    } else if (event.type === 'landmark') {
+        Effects.flashScreen('info', 400);
+        Effects.showLandmarkOverlay(event.landmark, event.description);
+    } else if (event.type === 'illness' || (event.severity && event.severity === 'danger')) {
+        Effects.flashScreen('danger', 500);
+    } else if (event.type === 'trail_event' && event.severity === 'success') {
+        Effects.flashScreen('success', 400);
+    } else if (event.type === 'trail_event') {
+        Effects.flashScreen('warn', 400);
+    }
+
     // Show epitaph editor on death for captains
     if (event.type === 'death' && event.player_name) {
         const state = lastState || {};
@@ -141,6 +165,11 @@ window.addEventListener('buy-supplies', (e) => {
     Network.emit('buy_supplies', { party_id, item, quantity });
 });
 
+window.addEventListener('choose-month', (e) => {
+    const { party_id, month } = e.detail;
+    Network.emit('choose_month', { party_id, month });
+});
+
 window.addEventListener('party-ready', (e) => {
     const { party_id } = e.detail;
     Network.emit('party_ready', { party_id });
@@ -151,19 +180,34 @@ window.addEventListener('submit-epitaph', (e) => {
     Network.emit('submit_epitaph', { party_id, tombstone_index, epitaph });
 });
 
-// Captain's Call vote buttons
-document.getElementById('btn-call-pace')?.addEventListener('click', () => {
-    const partyId = UI.getMyPartyId();
-    if (partyId) Network.emit('call_vote', { party_id: partyId, vote_type: 'pace' });
-});
-document.getElementById('btn-call-hunt')?.addEventListener('click', () => {
-    const partyId = UI.getMyPartyId();
-    if (partyId) Network.emit('call_vote', { party_id: partyId, vote_type: 'hunt' });
-});
-document.getElementById('btn-call-rest')?.addEventListener('click', () => {
-    const partyId = UI.getMyPartyId();
-    if (partyId) Network.emit('call_vote', { party_id: partyId, vote_type: 'rest' });
-});
+// Captain's Call vote input
+const captainInput = document.getElementById('captain-cmd-input');
+if (captainInput) {
+    captainInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            const val = parseInt(captainInput.value, 10);
+            const partyId = UI.getMyPartyId();
+            if (!partyId) return;
+
+            if (val === 1) {
+                // Check supplies (just highlight inventory panel)
+                const invPanel = document.getElementById('inventory-panel');
+                if (invPanel) {
+                    invPanel.style.outline = '2px solid var(--term-highlight)';
+                    setTimeout(() => invPanel.style.outline = 'none', 1000);
+                    invPanel.scrollIntoView({ behavior: 'smooth' });
+                }
+            } else if (val === 2) {
+                Network.emit('call_vote', { party_id: partyId, vote_type: 'pace' });
+            } else if (val === 3) {
+                Network.emit('call_vote', { party_id: partyId, vote_type: 'rest' });
+            } else if (val === 4) {
+                Network.emit('call_vote', { party_id: partyId, vote_type: 'hunt' });
+            }
+            captainInput.value = '';
+        }
+    });
+}
 
 // ------------------------------------------------------------------
 // State Handling
@@ -195,6 +239,9 @@ function handleStateUpdate(state) {
             if (party && party.status === 'hunting') {
                 UI.showScreen('hunting');
                 Hunting.start(state, myPlayerId);
+            } else if (party && party.status === 'outfitting') {
+                UI.showScreen('outfitting');
+                UI.renderOutfittingScreen(state, myPlayerId);
             } else {
                 UI.showScreen('game');
                 UI.updateGame(state, myPlayerId);

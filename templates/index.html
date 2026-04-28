@@ -14,13 +14,38 @@
         <div class="flicker-overlay"></div>
     </div>
 
+    <!-- Screen Flash Overlay -->
+    <div id="flash-overlay" class="flash-overlay" hidden></div>
+
+    <!-- Weather Overlay -->
+    <div id="weather-overlay" class="weather-overlay" hidden>
+        <div id="weather-particles"></div>
+    </div>
+
+    <!-- Landmark Arrival Overlay -->
+    <div id="landmark-overlay" class="landmark-overlay" hidden>
+        <div class="landmark-content">
+            <pre id="landmark-ascii" class="landmark-ascii"></pre>
+            <h2 id="landmark-name" class="landmark-name"></h2>
+            <p id="landmark-desc" class="landmark-desc"></p>
+        </div>
+    </div>
+
+    <!-- CRT Boot Effect -->
+    <div id="crt-boot" class="crt-boot" hidden>
+        <div class="crt-boot-text"></div>
+    </div>
+
+    <!-- Screen Transition Curtain -->
+    <div id="transition-curtain" class="transition-curtain" hidden></div>
+
     <!-- App Container -->
     <div id="app" role="application" aria-label="Oregon Trail: Classroom Edition Game">
 
         <!-- SCREEN: Join -->
         <section id="screen-join" class="screen active">
             <div class="screen-content">
-                <pre class="ascii-art">
+                <pre class="ascii-art desktop-title">
    ____  _                           _   _       _ _
   / __ \| |                         | | (_)     | | |
  | |  | | |__  _ __ ___   ___  _ __ | |_ _ _ __ | | |
@@ -28,7 +53,8 @@
  | |__| | | | | | | | | | (_) | | | | |_| | | | |_| |
   \____/|_| |_|_| |_| |_|\___/|_| |_|\__|_|_| |_(_|_)
                 </pre>
-                <p class="subtitle">MULTIPLYER EDITION</p>
+                <h1 class="mobile-title">OREGON TRAIL</h1>
+                <p class="subtitle">MULTIPLAYER EDITION</p>
                 <div class="input-group">
                     <label for="player-name">WHAT IS YOUR NAME?</label>
                     <input type="text" id="player-name" class="terminal-input" maxlength="20" autocomplete="off">
@@ -79,15 +105,54 @@
                     <p id="profession-selected" class="status-msg">No profession selected</p>
                 </div>
 
-                <div class="lobby-panel" style="width: 100%; margin-bottom: 1rem;">
-                    <h3>2. BUY SUPPLIES</h3>
-                    <div id="store-items" style="display: flex; flex-direction: column; gap: 0.3rem;">
-                        <!-- Populated by JS -->
+                <div class="lobby-panel" style="width: 100%; margin-bottom: 1rem;" id="outfitting-store-panel">
+                    <h3>3. MATT'S GENERAL STORE</h3>
+                    <p class="status-msg" style="margin-bottom: 1rem;">
+                        "Hello, I'm Matt. So you're going to Oregon! I can fix you up with what you need."<br>
+                        <strong>FUNDS: $<span id="store-funds">0</span></strong>
+                    </p>
+                    
+                    <div id="store-menu-container">
+                        <ul id="store-menu-list" style="list-style-type: none; padding: 0; margin: 0 0 1rem 0;">
+                            <li>1. Oxen ($40 / yoke)</li>
+                            <li>2. Food ($0.20 / lb)</li>
+                            <li>3. Clothing ($10 / set)</li>
+                            <li>4. Ammunition ($2 / box of 20)</li>
+                            <li>5. Wagon wheels ($10 each)</li>
+                            <li>6. Wagon axles ($10 each)</li>
+                            <li>7. Wagon tongues ($10 each)</li>
+                        </ul>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;" id="store-main-input-group">
+                            <span>Which item would you like to buy?</span>
+                            <input type="number" id="store-main-input" class="terminal-input" min="1" max="7" style="width: 4rem;">
+                        </div>
                     </div>
-                    <div style="display: flex; justify-content: space-between; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--term-border);">
-                        <span>Money remaining:</span>
-                        <span id="store-money" class="highlight">$0</span>
+
+                    <div id="store-buy-container" hidden>
+                        <p id="store-buy-prompt" style="margin-bottom: 0.5rem; color: var(--term-highlight);"></p>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span>Quantity:</span>
+                            <input type="number" id="store-buy-input" class="terminal-input" min="0" style="width: 5rem;">
+                        </div>
+                        <p style="margin-top: 0.5rem; font-size: 0.85rem; opacity: 0.8;">(Type quantity and press Enter to buy, or 0 to cancel)</p>
                     </div>
+                </div>
+
+                <div class="lobby-panel" style="width: 100%; margin-bottom: 1rem;" id="outfitting-month-panel" hidden>
+                    <h3>4. MONTH OF DEPARTURE</h3>
+                    <p class="status-msg" style="margin-bottom: 1rem;">You must decide which month to leave Independence.</p>
+                    <ul style="list-style-type: none; padding: 0; margin: 0 0 1rem 0;">
+                        <li>1. March</li>
+                        <li>2. April</li>
+                        <li>3. May</li>
+                        <li>4. June</li>
+                        <li>5. July</li>
+                    </ul>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span>What is your choice?</span>
+                        <input type="number" id="month-input" class="terminal-input" min="1" max="5" style="width: 4rem;">
+                    </div>
+                    <p id="month-selected" class="status-msg" style="margin-top: 0.5rem;">No month selected</p>
                 </div>
 
                 <button id="btn-outfit-ready" class="terminal-btn" disabled>READY TO DEPART</button>
@@ -114,8 +179,18 @@
             <!-- Main Content Area -->
             <div class="game-body">
                 <!-- Left: Event Log -->
-                <main class="viewport" id="game-log" aria-live="polite" aria-atomic="false">
-                    <p class="narrative">Welcome to Oregon Trail: Classroom Edition!</p>
+                <main class="viewport" id="game-viewport" aria-live="polite" aria-atomic="false">
+                    <!-- ASCII Travel Animation -->
+                    <div id="travel-band" class="travel-band">
+                        <pre id="travel-scene" class="travel-scene"></pre>
+                        <div id="travel-terrain" class="travel-terrain-label"></div>
+                    </div>
+                    <!-- Ambient Message Ticker -->
+                    <div id="ambient-ticker" class="ambient-ticker"></div>
+                    <!-- Event Log -->
+                    <div id="game-log">
+                        <p class="narrative">Welcome to Oregon Trail: Classroom Edition!</p>
+                    </div>
                 </main>
 
                 <!-- Right: Sidebar -->
@@ -133,12 +208,16 @@
                         <ul id="leaderboard" class="info-list"></ul>
                     </div>
                     <div class="panel" id="captain-panel" hidden>
-                        <h3>CAPTAIN'S CALL</h3>
-                        <p style="font-size: 0.85rem;">Call a party vote at any time:</p>
-                        <div style="display: flex; flex-direction: column; gap: 0.3rem;">
-                            <button id="btn-call-pace" class="terminal-btn" style="min-width: auto; font-size: 0.85rem; padding: 0.3rem 0.5rem;">Vote: Pace / Rations</button>
-                            <button id="btn-call-hunt" class="terminal-btn" style="min-width: auto; font-size: 0.85rem; padding: 0.3rem 0.5rem;">Vote: Go Hunt</button>
-                            <button id="btn-call-rest" class="terminal-btn" style="min-width: auto; font-size: 0.85rem; padding: 0.3rem 0.5rem;">Vote: Rest Day</button>
+                        <h3>CAPTAIN COMMANDS</h3>
+                        <ul style="list-style-type: none; padding: 0; margin: 0 0 1rem 0; font-size: 0.9rem;">
+                            <li>1. Check supplies (opens inventory)</li>
+                            <li>2. Change pace / rations (calls vote)</li>
+                            <li>3. Stop to rest (calls vote)</li>
+                            <li>4. Go hunt (calls vote)</li>
+                        </ul>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span style="font-size: 0.9rem;">Command:</span>
+                            <input type="number" id="captain-cmd-input" class="terminal-input" min="1" max="4" style="width: 3rem;">
                         </div>
                     </div>
                 </aside>
@@ -147,8 +226,12 @@
             <!-- Decision / Action Panel -->
             <footer class="input-panel" id="decision-panel" hidden>
                 <div class="decision-prompt" id="decision-prompt">WHAT IS YOUR CHOICE?</div>
+                <div class="decision-timer-bar">
+                    <div id="decision-timer-fill" class="decision-timer-fill"></div>
+                </div>
                 <div class="decision-timer" id="decision-timer"></div>
                 <div class="choices" id="choices"></div>
+                <div id="vote-tally" class="vote-tally"></div>
             </footer>
 
             <footer class="input-panel" id="action-panel">

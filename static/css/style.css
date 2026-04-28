@@ -6,7 +6,6 @@
     --term-bg: #0a0a0a;
     --term-bg-surface: #121212;
     --term-glow: rgba(74, 246, 38, 0.3);
-    --term-font: 'VT323', 'Courier New', Courier, monospace;
     --term-border: rgba(74, 246, 38, 0.3);
     --term-danger: #ff4444;
     --term-warn: #ffaa00;
@@ -26,7 +25,9 @@ html, body {
     font-size: 1.2rem;
     line-height: 1.4;
     height: 100vh;
+    height: 100dvh;
     overflow: hidden;
+    -webkit-text-size-adjust: 100%;
 }
 
 /* CRT Overlays */
@@ -66,15 +67,22 @@ html, body {
 /* Reduced Motion */
 @media (prefers-reduced-motion: reduce) {
     .flicker-overlay,
-    .scanlines {
+    .scanlines,
+    .travel-scene,
+    .weather-particle,
+    .decision-timer-fill,
+    .flash-overlay,
+    .landmark-overlay,
+    .transition-curtain {
         animation: none !important;
-        opacity: 0;
+        transition: none !important;
     }
 }
 
 /* App Shell */
 #app {
     height: 100vh;
+    height: 100dvh;
     width: 100vw;
     position: relative;
     z-index: 1;
@@ -84,16 +92,257 @@ html, body {
 .screen {
     display: none;
     height: 100vh;
+    height: 100dvh;
     width: 100vw;
     flex-direction: column;
     padding: 1rem;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .screen.active {
     display: flex;
 }
 
+/* Screen Transitions */
+.screen {
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.screen.active {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.transition-curtain {
+    position: fixed;
+    inset: 0;
+    background: var(--term-bg);
+    z-index: 2000;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+}
+
+.transition-curtain.show {
+    opacity: 1;
+    pointer-events: all;
+}
+
+/* CRT Boot Effect */
+.crt-boot {
+    position: fixed;
+    inset: 0;
+    background: var(--term-bg);
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    pointer-events: all;
+}
+
+.crt-boot-text {
+    color: var(--term-green);
+    font-family: var(--term-font);
+    font-size: 1.1rem;
+    white-space: pre-wrap;
+    line-height: 1.5;
+    max-width: 600px;
+    padding: 2rem;
+}
+
+.crt-boot::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+        0deg,
+        rgba(124, 255, 124, 0.05),
+        rgba(124, 255, 124, 0.05) 2px,
+        transparent 2px,
+        transparent 4px
+    );
+    animation: boot-scanlines 2s linear infinite;
+    pointer-events: none;
+}
+
+@keyframes boot-scanlines {
+    0% { opacity: 0.3; }
+    50% { opacity: 0.6; }
+    100% { opacity: 0.3; }
+}
+
+/* Flash Overlay */
+.flash-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1500;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.1s ease-out;
+}
+
+.flash-overlay.active {
+    opacity: 0.4;
+    transition: opacity 0.05s ease-in;
+}
+
+.flash-overlay.flash-death {
+    background: rgba(255, 0, 0, 0.35);
+    box-shadow: inset 0 0 100px rgba(255, 0, 0, 0.5);
+}
+
+.flash-overlay.flash-event {
+    background: rgba(255, 170, 0, 0.25);
+}
+
+.flash-overlay.flash-landmark {
+    background: rgba(68, 170, 255, 0.2);
+}
+
+.flash-overlay.flash-danger {
+    background: rgba(255, 0, 0, 0.2);
+    animation: pulse-danger 0.5s ease-in-out 3;
+}
+
+@keyframes pulse-danger {
+    0%, 100% { opacity: 0.2; }
+    50% { opacity: 0.5; }
+}
+
+/* Weather Overlay */
+.weather-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.weather-particle {
+    position: absolute;
+    pointer-events: none;
+    opacity: 0.6;
+}
+
+.weather-rain .weather-particle {
+    width: 1px;
+    height: 12px;
+    background: linear-gradient(to bottom, transparent, rgba(150, 200, 255, 0.8));
+    animation: rain-fall linear infinite;
+}
+
+@keyframes rain-fall {
+    0% { transform: translateY(-20px); opacity: 0; }
+    10% { opacity: 0.6; }
+    90% { opacity: 0.6; }
+    100% { transform: translateY(100vh); opacity: 0; }
+}
+
+.weather-snow .weather-particle {
+    width: 4px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    animation: snow-fall linear infinite;
+}
+
+@keyframes snow-fall {
+    0% { transform: translateY(-20px) translateX(0); opacity: 0; }
+    10% { opacity: 0.8; }
+    90% { opacity: 0.8; }
+    100% { transform: translateY(100vh) translateX(30px); opacity: 0; }
+}
+
+.weather-heat .weather-particle {
+    width: 100%;
+    height: 3px;
+    background: linear-gradient(to right, transparent, rgba(255, 100, 0, 0.15), transparent);
+    animation: heat-shimmer linear infinite;
+}
+
+@keyframes heat-shimmer {
+    0% { transform: translateY(-10px) scaleX(0.5); opacity: 0; }
+    50% { opacity: 1; }
+    100% { transform: translateY(100vh) scaleX(1.5); opacity: 0; }
+}
+
+.weather-heat::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, rgba(255, 80, 0, 0.05), transparent 40%);
+    animation: heat-haze 3s ease-in-out infinite;
+}
+
+@keyframes heat-haze {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 0.7; }
+}
+
+/* Landmark Overlay */
+.landmark-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1600;
+    background: rgba(0, 0, 0, 0.92);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    pointer-events: none;
+}
+
+.landmark-overlay.show {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.landmark-content {
+    text-align: center;
+    max-width: 700px;
+    padding: 2rem;
+    animation: landmark-rise 0.6s ease-out;
+}
+
+@keyframes landmark-rise {
+    0% { transform: translateY(30px) scale(0.95); opacity: 0; }
+    100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.landmark-ascii {
+    font-family: var(--term-font);
+    font-size: 0.85rem;
+    line-height: 1.2;
+    color: var(--term-green);
+    text-shadow: 0 0 10px var(--term-glow);
+    white-space: pre;
+    margin: 0 0 1rem 0;
+}
+
+.landmark-name {
+    font-size: 2.5rem;
+    color: #f0fff8;
+    text-shadow: 0 0 20px var(--term-green), 0 0 40px var(--term-glow);
+    margin: 0 0 0.5rem 0;
+    text-transform: uppercase;
+    letter-spacing: 6px;
+}
+
+.landmark-desc {
+    font-size: 1.2rem;
+    opacity: 0.85;
+    color: var(--term-info);
+    text-shadow: 0 0 5px rgba(68, 170, 255, 0.3);
+    margin: 0;
+}
+
+/* Screen Content */
 .screen-content {
     max-width: 800px;
     width: 100%;
@@ -117,6 +366,18 @@ html, body {
     text-align: center;
     white-space: pre;
     margin: 0;
+}
+
+/* Mobile/Desktop title toggle */
+.mobile-title {
+    display: none;
+    font-size: 2rem;
+    text-align: center;
+    text-shadow: 0 0 15px var(--term-glow);
+}
+
+.desktop-title {
+    display: block;
 }
 
 h1, h2, h3 {
@@ -280,6 +541,28 @@ h1, h2, h3 {
     white-space: nowrap;
 }
 
+/* Status Bar Color Coding */
+.stat-health-good { color: var(--term-green); text-shadow: 0 0 5px var(--term-glow); }
+.stat-health-fair { color: #ccff66; text-shadow: 0 0 5px rgba(204, 255, 102, 0.3); }
+.stat-health-poor { color: var(--term-warn); text-shadow: 0 0 5px rgba(255, 170, 0, 0.3); }
+.stat-health-verypoor { color: #ff6644; text-shadow: 0 0 8px rgba(255, 100, 0, 0.4); }
+.stat-health-dead { color: var(--term-danger); text-shadow: 0 0 8px rgba(255, 0, 0, 0.5); }
+
+.stat-food-critical {
+    color: var(--term-danger);
+    animation: pulse-food 1s ease-in-out infinite;
+}
+
+@keyframes pulse-food {
+    0%, 100% { opacity: 1; text-shadow: 0 0 5px rgba(255, 0, 0, 0.5); }
+    50% { opacity: 0.5; text-shadow: 0 0 15px rgba(255, 0, 0, 0.8); }
+}
+
+.stat-weather-rain { color: #88ccff; }
+.stat-weather-snow { color: #eeeeff; }
+.stat-weather-hot { color: #ffaa44; }
+.stat-weather-cold { color: #aaddff; }
+
 .game-body {
     display: flex;
     flex: 1;
@@ -295,6 +578,8 @@ h1, h2, h3 {
     border: 1px solid var(--term-border);
     background: var(--term-bg-surface);
     scroll-behavior: smooth;
+    display: flex;
+    flex-direction: column;
 }
 
 .viewport::-webkit-scrollbar {
@@ -307,6 +592,126 @@ h1, h2, h3 {
 
 .viewport::-webkit-scrollbar-thumb {
     background: var(--term-green-dim);
+}
+
+/* ASCII Travel Animation */
+.travel-band {
+    border-bottom: 1px solid var(--term-border);
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.5rem;
+    min-height: 80px;
+    flex-shrink: 0;
+}
+
+.travel-scene {
+    font-family: var(--term-font);
+    font-size: 0.75rem;
+    line-height: 1.15;
+    color: var(--term-green);
+    text-shadow: 0 0 5px var(--term-glow);
+    white-space: pre;
+    margin: 0;
+    opacity: 0.7;
+}
+
+.travel-terrain-label {
+    font-size: 0.75rem;
+    opacity: 0.5;
+    text-align: right;
+    margin-top: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+/* Screen Flashes */
+.screen-flash {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
+    z-index: 10000;
+}
+
+.flash-danger { background: var(--term-danger); animation: flash-anim 0.4s ease-out; }
+.flash-success { background: var(--term-green); animation: flash-anim 0.3s ease-out; }
+.flash-warn { background: var(--term-warn); animation: flash-anim 0.3s ease-out; }
+.flash-info { background: var(--term-highlight); animation: flash-anim 0.3s ease-out; }
+
+@keyframes flash-anim {
+    0% { opacity: 0.3; }
+    100% { opacity: 0; }
+}
+
+/* Weather Overlays */
+.weather-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+    overflow: hidden;
+    opacity: 0.2;
+}
+
+.weather-rain::after {
+    content: "|| ||\n || ||\n|| ||";
+    position: absolute;
+    top: -100%;
+    left: 0;
+    width: 200%;
+    height: 200%;
+    font-family: monospace;
+    font-size: 20px;
+    color: #88ccff;
+    white-space: pre;
+    animation: rain-fall 0.5s linear infinite;
+}
+
+@keyframes rain-fall {
+    from { transform: translateY(0); }
+    to { transform: translateY(50%); }
+}
+
+.weather-snow::after {
+    content: "* * *\n * * *\n* * *";
+    position: absolute;
+    top: -100%;
+    left: 0;
+    width: 200%;
+    height: 200%;
+    font-size: 24px;
+    color: #fff;
+    white-space: pre;
+    animation: snow-drift 3s linear infinite;
+}
+
+@keyframes snow-drift {
+    0% { transform: translate(0, 0); }
+    50% { transform: translate(20px, 50%); }
+    100% { transform: translate(0, 100%); }
+}
+
+.weather-hot { background: rgba(255, 170, 0, 0.1); animation: heat-haze 2s ease-in-out infinite; }
+@keyframes heat-haze {
+    0%, 100% { opacity: 0.05; }
+    50% { opacity: 0.15; }
+}
+
+/* Ambient Ticker */
+.ambient-ticker {
+    font-size: 0.85rem;
+    opacity: 0.6;
+    font-style: italic;
+    padding: 0.25rem 0;
+    border-bottom: 1px dashed var(--term-border);
+    margin-bottom: 0.5rem;
+    color: var(--term-green-dim);
+    min-height: 1.5rem;
+}
+
+/* Event Log */
+#game-log {
+    flex: 1;
+    overflow-y: auto;
 }
 
 .narrative {
@@ -328,6 +733,21 @@ h1, h2, h3 {
 .narrative.landmark {
     color: var(--term-info);
     text-shadow: 0 0 8px rgba(68, 170, 255, 0.4);
+}
+
+/* Typewriter effect for decision prompt */
+.typewriter-text {
+    overflow: hidden;
+    border-right: 2px solid var(--term-green);
+    white-space: nowrap;
+    animation: typing-cursor 0.75s step-end infinite;
+    display: inline-block;
+    max-width: 100%;
+}
+
+@keyframes typing-cursor {
+    0%, 100% { border-color: var(--term-green); }
+    50% { border-color: transparent; }
 }
 
 /* Sidebar */
@@ -373,6 +793,40 @@ h1, h2, h3 {
     margin-bottom: 0.4rem;
 }
 
+/* Decision Timer Bar */
+.decision-timer-bar {
+    width: 100%;
+    height: 4px;
+    background: rgba(74, 246, 38, 0.15);
+    margin-bottom: 0.4rem;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.decision-timer-fill {
+    height: 100%;
+    background: var(--term-green);
+    box-shadow: 0 0 6px var(--term-glow);
+    width: 100%;
+    transition: width 1s linear;
+}
+
+.decision-timer-fill.warning {
+    background: var(--term-warn);
+    box-shadow: 0 0 6px rgba(255, 170, 0, 0.5);
+}
+
+.decision-timer-fill.danger {
+    background: var(--term-danger);
+    box-shadow: 0 0 8px rgba(255, 0, 0, 0.6);
+    animation: pulse-timer 0.5s ease-in-out infinite;
+}
+
+@keyframes pulse-timer {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
 .choices {
     display: flex;
     gap: 0.5rem;
@@ -410,6 +864,28 @@ h1, h2, h3 {
     box-shadow: 0 0 15px var(--term-glow);
 }
 
+/* Vote Tally */
+.vote-tally {
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+    opacity: 0.8;
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.vote-tally-item {
+    padding: 0.2rem 0.5rem;
+    border: 1px solid var(--term-border);
+    background: rgba(74, 246, 38, 0.05);
+}
+
+.vote-tally-item.leading {
+    border-color: var(--term-green);
+    background: rgba(74, 246, 38, 0.15);
+    box-shadow: 0 0 5px var(--term-glow);
+}
+
 /* Scrollbar for sidebar */
 .sidebar::-webkit-scrollbar {
     width: 6px;
@@ -436,7 +912,11 @@ h1, h2, h3 {
     border: 0;
 }
 
-/* Responsive */
+/* ==========================================================================
+   RESPONSIVE DESIGN
+   ========================================================================== */
+
+/* --- Tablet (768px and below) --- */
 @media (max-width: 768px) {
     html, body {
         font-size: 1rem;
@@ -444,6 +924,18 @@ h1, h2, h3 {
 
     .ascii-art {
         font-size: 0.6rem;
+    }
+
+    .terminal-btn {
+        min-width: 200px;
+        padding: 0.8rem 1.2rem;
+        font-size: 1.2rem;
+    }
+
+    .terminal-input {
+        font-size: 1.1rem;
+        padding: 0.5rem;
+        min-height: 44px;
     }
 
     .game-body {
@@ -456,10 +948,14 @@ h1, h2, h3 {
         flex-direction: row;
         overflow-x: auto;
         overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        gap: 0.5rem;
+        padding-bottom: 0.5rem;
     }
 
     .panel {
-        min-width: 180px;
+        min-width: 200px;
+        flex-shrink: 0;
     }
 
     .status-bar {
@@ -468,6 +964,221 @@ h1, h2, h3 {
 
     .choices {
         flex-direction: column;
+    }
+
+    .lobby-panel {
+        max-width: 100%;
+    }
+
+    .screen-content {
+        padding: 0 0.5rem 2rem 0.5rem;
+    }
+
+    /* Landmark overlay adjustments */
+    .landmark-name {
+        font-size: 1.8rem;
+        letter-spacing: 3px;
+    }
+
+    .landmark-ascii {
+        font-size: 0.6rem;
+    }
+
+    /* Outfitting store menu readability */
+    #screen-outfitting .screen-content {
+        max-width: 100% !important;
+        padding-left: 0.5rem !important;
+        padding-right: 0.5rem !important;
+    }
+}
+
+/* --- Phone (480px and below) --- */
+@media (max-width: 480px) {
+    html, body {
+        font-size: 0.95rem;
+    }
+
+    .screen {
+        padding: 0.5rem;
+    }
+
+    .desktop-title {
+        display: none;
+    }
+
+    .mobile-title {
+        display: block;
+    }
+
+    .subtitle {
+        font-size: 1rem;
+        letter-spacing: 2px;
+    }
+
+    h1 {
+        font-size: 1.3rem;
+        letter-spacing: 1px;
+    }
+
+    .terminal-btn {
+        min-width: unset;
+        width: 100%;
+        padding: 0.8rem 1rem;
+        font-size: 1.1rem;
+    }
+
+    .terminal-input {
+        width: 100%;
+        font-size: 1rem;
+    }
+
+    .input-group {
+        max-width: 100%;
+    }
+
+    /* Game screen */
+    #screen-game {
+        padding: 0.25rem;
+        gap: 0.25rem;
+    }
+
+    .status-bar {
+        flex-direction: column;
+        gap: 0.25rem;
+        font-size: 0.8rem;
+        padding: 0.3rem;
+    }
+
+    .stat-group {
+        gap: 0.5rem;
+        justify-content: center;
+    }
+
+    .viewport {
+        padding: 0.5rem;
+        min-height: 120px;
+    }
+
+    .sidebar {
+        flex-direction: column;
+        overflow-x: visible;
+        overflow-y: visible;
+        max-height: 40vh;
+        overflow-y: auto;
+    }
+
+    .panel {
+        min-width: auto;
+        width: 100%;
+    }
+
+    .input-panel {
+        min-height: 60px;
+        padding: 0.4rem;
+    }
+
+    .decision-prompt {
+        font-size: 0.95rem;
+    }
+
+    .choice-btn {
+        min-width: 100%;
+        padding: 0.7rem;
+        font-size: 1.1rem;
+    }
+
+    /* Outfitting */
+    #screen-outfitting .screen-content {
+        padding-top: 0.5rem !important;
+    }
+
+    .lobby-panel h3 {
+        font-size: 1rem;
+    }
+
+    /* Hunting */
+    #screen-hunting .screen-content {
+        padding: 0.25rem;
+    }
+
+    .canvas-container {
+        max-height: 50vh;
+    }
+
+    #hunting-canvas {
+        max-height: 50vh;
+    }
+
+    /* Captain commands */
+    #captain-panel li {
+        font-size: 0.85rem !important;
+    }
+
+    /* Travel band */
+    .travel-scene {
+        font-size: 0.55rem;
+    }
+
+    .landmark-name {
+        font-size: 1.4rem;
+    }
+}
+
+/* --- Small Phone (360px and below) --- */
+@media (max-width: 360px) {
+    html, body {
+        font-size: 0.9rem;
+    }
+
+    .ascii-art {
+        font-size: 0.3rem;
+    }
+
+    .subtitle {
+        font-size: 0.9rem;
+        letter-spacing: 1px;
+    }
+
+    .terminal-btn {
+        padding: 0.6rem 0.8rem;
+        font-size: 1rem;
+    }
+
+    .status-bar {
+        font-size: 0.75rem;
+    }
+
+    .stat-group {
+        gap: 0.3rem;
+    }
+
+    .travel-scene {
+        font-size: 0.45rem;
+    }
+}
+
+/* --- Landscape phones (short height) --- */
+@media (max-height: 500px) and (max-width: 900px) {
+    .screen-content {
+        justify-content: flex-start;
+        padding-top: 0.5rem;
+    }
+
+    .ascii-art {
+        font-size: 0.4rem;
+        margin-bottom: 0;
+    }
+
+    .subtitle {
+        margin-bottom: 0;
+    }
+
+    .terminal-btn {
+        padding: 0.5rem 1rem;
+    }
+
+    .travel-band {
+        min-height: 50px;
     }
 }
 
@@ -557,4 +1268,165 @@ h1, h2, h3 {
 /* Host dashboard layout fixes */
 #screen-host-dash .screen-content {
     overflow: hidden;
+}
+/* Screen Flash Overlay */
+.flash-overlay {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
+    z-index: 10000;
+    transition: opacity 0.1s;
+}
+
+.flash-overlay.active { opacity: 0.15; }
+.flash-overlay.flash-danger { background: var(--term-danger); }
+.flash-overlay.flash-success { background: var(--term-green); }
+.flash-overlay.flash-warn { background: var(--term-warn); }
+.flash-overlay.flash-info { background: var(--term-highlight); }
+
+/* Weather Overlays */
+.weather-overlay {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+    overflow: hidden;
+    opacity: 0.2;
+}
+
+.weather-particle {
+    position: absolute;
+    width: 2px;
+    height: 10px;
+    background: #fff;
+    opacity: 0.5;
+}
+
+.weather-rain .weather-particle {
+    background: #88ccff;
+    width: 1px;
+    height: 15px;
+    animation: rain-fall 0.8s linear infinite;
+}
+
+.weather-snow .weather-particle {
+    background: #fff;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    animation: snow-drift 3s linear infinite;
+}
+
+.weather-heat .weather-particle {
+    background: var(--term-warn);
+    width: 20px;
+    height: 1px;
+    opacity: 0.1;
+    animation: heat-haze 2s ease-in-out infinite;
+}
+
+@keyframes rain-fall {
+    from { transform: translateY(-20px); }
+    to { transform: translateY(100vh); }
+}
+
+@keyframes snow-drift {
+    0% { transform: translate(0, -20px); }
+    50% { transform: translate(20px, 50vh); }
+    100% { transform: translate(0, 100vh); }
+}
+
+@keyframes heat-haze {
+    0%, 100% { opacity: 0.05; transform: scaleX(1); }
+    50% { opacity: 0.15; transform: scaleX(1.5); }
+}
+
+/* Landmark Overlay */
+.landmark-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10002;
+    opacity: 0;
+    transition: opacity 0.5s;
+    pointer-events: none;
+}
+
+.landmark-overlay.show {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.landmark-content {
+    text-align: center;
+    max-width: 600px;
+    padding: 2rem;
+    border: 2px solid var(--term-green);
+    background: #000;
+}
+
+.landmark-ascii {
+    font-size: 0.8rem;
+    line-height: 1.1;
+    margin-bottom: 2rem;
+    color: var(--term-green);
+    text-shadow: 0 0 5px var(--term-glow);
+}
+
+.landmark-name {
+    font-size: 2.5rem;
+    color: var(--term-highlight);
+    text-shadow: 0 0 15px var(--term-highlight);
+    margin-bottom: 1rem;
+}
+
+.landmark-desc {
+    font-size: 1.2rem;
+    opacity: 0.8;
+}
+
+/* Decision Timer Bar */
+.decision-timer-bar {
+    width: 100%;
+    height: 4px;
+    background: var(--term-dim);
+    margin-bottom: 0.5rem;
+    overflow: hidden;
+}
+
+.decision-timer-fill {
+    height: 100%;
+    background: var(--term-green);
+    width: 100%;
+    transition: width 1s linear, background-color 0.3s;
+}
+
+.decision-timer-fill.warning { background: var(--term-warn); }
+.decision-timer-fill.danger { background: var(--term-danger); animation: pulse-timer 0.5s infinite; }
+
+@keyframes pulse-timer {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* CRT Boot Effect */
+.crt-boot {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    z-index: 20000;
+    padding: 2rem;
+    font-family: var(--term-font);
+    color: #fff;
+    overflow: hidden;
+}
+
+.crt-boot-text {
+    white-space: pre-wrap;
+    font-size: 1.2rem;
+    line-height: 1.4;
 }

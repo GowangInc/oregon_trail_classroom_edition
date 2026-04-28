@@ -204,17 +204,14 @@ def on_join_session(data):
     name = data.get("name", "Unknown")
     if contains_swear(name):
         name = filter_swear(name, "???")
-    session_code = data.get("session_code")
 
-    # Find session by code, or use the only active session
+    # Find the active session (there should be exactly one)
     mgr = None
-    if session_code:
-        mgr = next((m for m in sessions.values() if m.session.session_code == session_code), None)
-    elif len(sessions) == 1:
+    if len(sessions) == 1:
         mgr = next(iter(sessions.values()))
 
     if not mgr:
-        emit("error", {"message": "Session not found. Ask your teacher for the session code."})
+        emit("error", {"message": "No active game session. Please wait for your teacher to start the session."})
         return
 
     player = mgr.add_player(name, request.sid)
@@ -776,6 +773,24 @@ def on_choose_profession(data):
     party_id = data.get("party_id")
     profession = data.get("profession")
     result = mgr.choose_profession(party_id, profession)
+    emit("buy_result", result)
+    _broadcast_session_state(mgr)
+
+
+@socketio.on("choose_month")
+def on_choose_month(data):
+    player_id = _get_player_id()
+    if not player_id:
+        emit("error", {"message": "Not authenticated"})
+        return
+    mgr = _get_manager_for_player(player_id)
+    if not mgr:
+        emit("error", {"message": "Session not found"})
+        return
+
+    party_id = data.get("party_id")
+    start_month = data.get("month")
+    result = mgr.choose_month(party_id, start_month)
     emit("buy_result", result)
     _broadcast_session_state(mgr)
 

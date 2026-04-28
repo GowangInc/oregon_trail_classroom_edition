@@ -73,15 +73,21 @@ PROFESSION_STARTING_POINTS: Dict[Profession, int] = {
 # ---------------------------------------------------------------------------
 # General Store Prices (at Independence, MO)
 # ---------------------------------------------------------------------------
-STORE_PRICES: Dict[str, int] = {
+STORE_PRICES: Dict[str, float] = {
     "oxen": 40,              # per yoke (2 oxen)
-    "food": 0.10,            # per pound
+    "food": 0.20,            # per pound (original 1985 price)
     "clothing": 10,          # per set
     "bullets": 2,            # per box (20 bullets)
     "wagon_wheel": 10,
     "wagon_axle": 10,
     "wagon_tongue": 10,
 }
+
+# Maximum spare parts of each type (original cap)
+MAX_SPARE_PARTS = 3
+
+# Barlow Toll Road cost at The Dalles
+BARLOW_TOLL_ROAD_COST = 10
 
 # Fort prices increase as you travel west (multiplier)
 FORT_PRICE_MULTIPLIERS: Dict[str, float] = {
@@ -354,6 +360,46 @@ TRAIL_EVENTS: List[TrailEvent] = [
         weather_multipliers={Weather.RAIN: 2.0, Weather.SNOW: 2.5, Weather.HOT: 1.0, Weather.COLD: 1.2},
         requires_supplies=False,
     ),
+    TrailEvent(
+        id="heavy_fog",
+        description="Heavy fog rolls in. You can barely see the trail.",
+        base_probability=0.02,
+        terrain_multipliers={Terrain.PRAIRIE: 1.0, Terrain.MOUNTAINS: 2.0, Terrain.DESERT: 0.3, Terrain.FOREST: 1.5},
+        weather_multipliers={Weather.RAIN: 2.0, Weather.SNOW: 0.5, Weather.HOT: 0.2, Weather.COLD: 1.5},
+        requires_supplies=False,
+    ),
+    TrailEvent(
+        id="blizzard",
+        description="A terrible blizzard strikes!",
+        base_probability=0.01,
+        terrain_multipliers={Terrain.PRAIRIE: 0.5, Terrain.MOUNTAINS: 3.0, Terrain.DESERT: 0.0, Terrain.FOREST: 1.0},
+        weather_multipliers={Weather.RAIN: 0.0, Weather.SNOW: 5.0, Weather.HOT: 0.0, Weather.VERY_COLD: 4.0, Weather.COLD: 2.0},
+        requires_supplies=False,
+    ),
+    TrailEvent(
+        id="no_grass",
+        description="There is no grass for the oxen here.",
+        base_probability=0.02,
+        terrain_multipliers={Terrain.PRAIRIE: 0.3, Terrain.MOUNTAINS: 1.5, Terrain.DESERT: 3.0, Terrain.FOREST: 0.5},
+        weather_multipliers={Weather.RAIN: 0.5, Weather.SNOW: 2.0, Weather.HOT: 2.0, Weather.VERY_HOT: 3.0},
+        requires_supplies=False,
+    ),
+    TrailEvent(
+        id="abandoned_wagon",
+        description="You find an abandoned wagon by the trail.",
+        base_probability=0.01,
+        terrain_multipliers={Terrain.PRAIRIE: 1.0, Terrain.MOUNTAINS: 1.5, Terrain.DESERT: 2.0, Terrain.FOREST: 0.8},
+        weather_multipliers={Weather.RAIN: 1.0, Weather.SNOW: 1.0, Weather.HOT: 1.0, Weather.COLD: 1.0},
+        requires_supplies=False,
+    ),
+    TrailEvent(
+        id="npc_trade",
+        description="You meet a fellow traveler who wants to trade.",
+        base_probability=0.015,
+        terrain_multipliers={Terrain.PRAIRIE: 1.5, Terrain.MOUNTAINS: 0.8, Terrain.DESERT: 0.5, Terrain.FOREST: 1.0},
+        weather_multipliers={Weather.RAIN: 0.5, Weather.SNOW: 0.3, Weather.HOT: 1.0, Weather.WARM: 1.5},
+        requires_supplies=False,
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -403,8 +449,8 @@ HUNTING_ANIMALS: Dict[str, Dict[str, int]] = {
     "squirrel": {"food": 3, "difficulty": 1},
     "deer": {"food": 60, "difficulty": 3},
     "elk": {"food": 90, "difficulty": 4},
-    "bear": {"food": 80, "difficulty": 5},
-    "buffalo": {"food": 100, "difficulty": 4},
+    "bear": {"food": 400, "difficulty": 5},
+    "buffalo": {"food": 800, "difficulty": 4},
 }
 
 # ---------------------------------------------------------------------------

@@ -203,6 +203,10 @@ class SessionManager:
             self.session.game_status = "active"
 
             for party in self.session.parties.values():
+                # Set starting date based on selected month
+                start_month = getattr(party, 'start_month', 3)  # Default to March
+                party.global_date = date(1848, start_month, 1)
+                
                 if party.outfitting_complete:
                     party.status = "traveling"
                     continue
@@ -682,19 +686,44 @@ class SessionManager:
             self.session.parties[party_id] = party
             return {"success": True, "message": f"Profession set to {profession.value}.", "money": party.inventory.money}
 
-    def buy_starting_supplies(self, party_id: str, item: str, quantity: int) -> Dict[str, Any]:
+    def choose_month(self, party_id: str, start_month: int) -> Dict[str, Any]:
         with self.lock:
             party = self.session.parties.get(party_id)
             if not party:
                 return {"success": False, "message": "Party not found"}
             if self.session.game_status != "outfitting":
                 return {"success": False, "message": "Not in outfitting phase"}
+            
+            if start_month < 1 or start_month > 12:
+                return {"success": False, "message": "Invalid month"}
+                
+            party.start_month = start_month
+            self.session.parties[party_id] = party
+            return {"success": True, "message": f"Departure month set to {start_month}."}
+
+    def buy_starting_supplies(self, party_id: str, item: str, quantity: int) -> Dict[str, Any]:
+        with self.lock:
+            party = self.session.parties.get(party_id)
+            if not party:
+                return {"success": False, "message": "Party not found"}
+            
+            # Allow buying if in initial outfitting phase OR if party is currently at a fort store
+            if self.session.game_status != "outfitting" and party.status != "outfitting":
+                return {"success": False, "message": "Not in outfitting phase"}
 
             engine = self.engines.get(party_id)
             if not engine:
                 return {"success": False, "message": "No engine"}
 
-            party, result = engine.buy_starting_supplies(party, {item: quantity})
+            # Calculate price multiplier based on distance if in active game (forts are more expensive)
+            price_multiplier = 1.0
+            if self.session.game_status == "active":
+                from game_data import FORT_PRICE_MULTIPLIERS, LANDMARKS
+                # Find current landmark by name if possible, or index
+                current_lm_name = LANDMARKS[party.current_landmark_index].name
+                price_multiplier = FORT_PRICE_MULTIPLIERS.get(current_lm_name, 1.0)
+
+            party, result = engine.buy_item(party, item, quantity, price_multiplier)
             self.session.parties[party_id] = party
             result["inventory"] = party.inventory.to_dict()
             return result
@@ -704,10 +733,16 @@ class SessionManager:
             party = self.session.parties.get(party_id)
             if not party:
                 return {"success": False, "message": "Party not found"}
+            
+            # If at a fort during active game, return to traveling
+            if self.session.game_status == "active":
+                party.status = "traveling"
+                return {"success": True, "message": "You leave the store and return to the trail."}
+
             if self.session.game_status != "outfitting":
                 return {"success": False, "message": "Not in outfitting phase"}
 
-            # Validate minimum supplies
+            # Validate minimum supplies for initial departure
             if party.inventory.oxen < 1:
                 return {"success": False, "message": "You need at least 1 yoke of oxen."}
             if party.inventory.food < 1:

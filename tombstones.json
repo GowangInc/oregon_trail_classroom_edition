@@ -28,5 +28,105 @@
     "epitaph": "Here lies nicholas, who died of exhaustion.",
     "written_by_party_id": "3b083bc0",
     "visited_by_party_ids": []
+  },
+  {
+    "player_name": "nicholas",
+    "party_name": "Wagon Party 1",
+    "mile_marker": 348,
+    "cause": "a snakebite",
+    "date": "1848-03-31",
+    "epitaph": "Here lies nicholas, who died of a snakebite.",
+    "written_by_party_id": "6a9df519",
+    "visited_by_party_ids": []
+  },
+  {
+    "player_name": "Gertrude",
+    "party_name": "Wagon Party 1",
+    "mile_marker": 348,
+    "cause": "measles",
+    "date": "1848-03-31",
+    "epitaph": "Here lies Gertrude, who died of measles.",
+    "written_by_party_id": "6a9df519",
+    "visited_by_party_ids": []
+  },
+  {
+    "player_name": "Mordecai",
+    "party_name": "Wagon Party 1",
+    "mile_marker": 360,
+    "cause": "starvation",
+    "date": "1848-04-01",
+    "epitaph": "Here lies Mordecai, who died of starvation.",
+    "written_by_party_id": "6a9df519",
+    "visited_by_party_ids": []
+  },
+  {
+    "player_name": "Rachel",
+    "party_name": "Wagon Party 1",
+    "mile_marker": 368,
+    "cause": "starvation",
+    "date": "1848-04-02",
+    "epitaph": "Here lies Rachel, who died of starvation.",
+    "written_by_party_id": "6a9df519",
+    "visited_by_party_ids": []
+  },
+  {
+    "player_name": "Katherine",
+    "party_name": "Wagon Party 1",
+    "mile_marker": 368,
+    "cause": "hypothermia",
+    "date": "1848-04-02",
+    "epitaph": "Here lies Katherine, who died of hypothermia.",
+    "written_by_party_id": "6a9df519",
+    "visited_by_party_ids": []
+  },
+  {
+    "player_name": "Zebulon",
+    "party_name": "Wagon Party 1",
+    "mile_marker": 327,
+    "cause": "typhoid fever",
+    "date": "1848-03-29",
+    "epitaph": "Here lies Zebulon, who died of typhoid fever.",
+    "written_by_party_id": "ce0723e8",
+    "visited_by_party_ids": []
+  },
+  {
+    "player_name": "nicholsa",
+    "party_name": "Wagon Party 1",
+    "mile_marker": 339,
+    "cause": "hypothermia",
+    "date": "1848-03-30",
+    "epitaph": "Here lies nicholsa, who died of hypothermia.",
+    "written_by_party_id": "ce0723e8",
+    "visited_by_party_ids": []
+  },
+  {
+    "player_name": "Obadiah",
+    "party_name": "Wagon Party 1",
+    "mile_marker": 351,
+    "cause": "measles",
+    "date": "1848-03-31",
+    "epitaph": "Here lies Obadiah, who died of measles.",
+    "written_by_party_id": "ce0723e8",
+    "visited_by_party_ids": []
+  },
+  {
+    "player_name": "Eben",
+    "party_name": "Wagon Party 1",
+    "mile_marker": 359,
+    "cause": "typhoid fever",
+    "date": "1848-04-01",
+    "epitaph": "Here lies Eben, who died of typhoid fever.",
+    "written_by_party_id": "ce0723e8",
+    "visited_by_party_ids": []
+  },
+  {
+    "player_name": "Clementine",
+    "party_name": "Wagon Party 1",
+    "mile_marker": 371,
+    "cause": "exhaustion",
+    "date": "1848-04-02",
+    "epitaph": "Here lies Clementine, who died of exhaustion.",
+    "written_by_party_id": "ce0723e8",
+    "visited_by_party_ids": []
   }
 ]

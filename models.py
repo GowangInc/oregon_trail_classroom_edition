@@ -240,6 +240,7 @@ class Party:
     score: int = 0
     hunting_region_depletion: float = 0.0  # 0.0 to 1.0
     last_vote_called_at: float = 0.0
+    start_month: int = 5  # Default May
 
     @property
     def is_alive(self) -> bool:
@@ -270,6 +271,8 @@ class Party:
             "event_log": self.event_log[-20:] if self.event_log else [],  # Last 20 events
             "tombstones": [t.to_dict() for t in self.tombstones],
             "score": self.score,
+            "hunting_region_depletion": self.hunting_region_depletion,
+            "start_month": self.start_month,
         }
         if include_private:
             data["inventory"] = self.inventory.to_dict()
@@ -291,6 +294,7 @@ class Party:
             status=data.get("status", "outfitting"),
             outfitting_complete=data.get("outfitting_complete", False),
             travel_days_since_decision=data.get("travel_days_since_decision", 0),
+            start_month=data.get("start_month", 5),
         )
         if "inventory" in data:
             party.inventory = Inventory.from_dict(data["inventory"])

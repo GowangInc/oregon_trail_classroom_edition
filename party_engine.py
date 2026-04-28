@@ -36,6 +36,8 @@ from game_data import (
     SCORE_PER_BULLET,
     HUNTING_MAX_FOOD_PER_HUNT,
     HUNTING_BULLETS_PER_SHOT,
+    MAX_SPARE_PARTS,
+    BARLOW_TOLL_ROAD_COST,
     Weather,
     Terrain,
     Pace,
@@ -222,6 +224,7 @@ class PartyEngine:
                 "type": "landmark",
                 "message": f"{party.party_name} has reached {next_lm.name}!",
                 "landmark": next_lm.name,
+                "description": next_lm.description,
                 "is_fort": next_lm.is_fort,
                 "is_river": next_lm.is_river,
             })
@@ -231,14 +234,48 @@ class PartyEngine:
                     "type": "finished",
                     "message": f"{party.party_name} has reached Oregon!",
                 })
-            elif next_lm.is_river:
-                party.status = "river_crossing"
+
+            # --- BRANCH POINT: South Pass ---
+            elif next_lm.name == "South Pass":
+                party.status = "decision"
                 party.travel_days_since_decision = 0
                 party.decision_pending = Decision(
                     party_id=party.party_id,
+                    decision_type=DecisionType.TAKE_SHORTCUT,
+                    prompt="You have reached the Continental Divide at South Pass. Which route will you take?",
+                    options=["Head to Fort Bridger (safer, fort ahead)", "Take the Green River shortcut (shorter, riskier)"],
+                    captain_id=party.captain_id,
+                    captain_default="Head to Fort Bridger (safer, fort ahead)",
+                    timeout_seconds=10,
+                )
+
+            # --- BRANCH POINT: The Dalles ---
+            elif next_lm.name == "The Dalles":
+                party.status = "decision"
+                party.travel_days_since_decision = 0
+                toll_cost = BARLOW_TOLL_ROAD_COST
+                party.decision_pending = Decision(
+                    party_id=party.party_id,
+                    decision_type=DecisionType.TAKE_SHORTCUT,
+                    prompt=f"The Dalles — the end of the overland trail. You must find a way to the Willamette Valley. The Barlow Toll Road costs ${toll_cost}.",
+                    options=[f"Take the Barlow Toll Road (${toll_cost}, safer)", "Float down the Columbia River (free, dangerous)"],
+                    captain_id=party.captain_id,
+                    captain_default=f"Take the Barlow Toll Road (${toll_cost}, safer)",
+                    timeout_seconds=10,
+                )
+
+            elif next_lm.is_river:
+                party.status = "river_crossing"
+                party.travel_days_since_decision = 0
+                # Snake River gets an Indian guide option
+                options = ["Ford the river", "Caulk the wagon", "Take a ferry", "Wait for better conditions"]
+                if next_lm.name == "Snake River Crossing":
+                    options.insert(2, "Hire an Indian guide ($5)")
+                party.decision_pending = Decision(
+                    party_id=party.party_id,
                     decision_type=DecisionType.RIVER_METHOD,
-                    prompt=f"You must cross the {next_lm.name}. How will you proceed?",
-                    options=["Ford the river", "Caulk the wagon", "Take a ferry", "Wait for better conditions"],
+                    prompt=f"You must cross the {next_lm.name}. {next_lm.description} How will you proceed?",
+                    options=options,
                     captain_id=party.captain_id,
                     captain_default="Ford the river",
                     timeout_seconds=5,
@@ -249,7 +286,7 @@ class PartyEngine:
                 party.decision_pending = Decision(
                     party_id=party.party_id,
                     decision_type=DecisionType.BUY_SUPPLIES,
-                    prompt=f"You have reached {next_lm.name}. Would you like to buy supplies?",
+                    prompt=f"You have reached {next_lm.name}. {next_lm.description} Would you like to buy supplies?",
                     options=["Buy supplies", "Continue on"],
                     captain_id=party.captain_id,
                     captain_default="Continue on",
@@ -261,7 +298,7 @@ class PartyEngine:
                 party.decision_pending = Decision(
                     party_id=party.party_id,
                     decision_type=DecisionType.REST,
-                    prompt=f"You have reached {next_lm.name}. What would you like to do?",
+                    prompt=f"You have reached {next_lm.name}. {next_lm.description} What would you like to do?",
                     options=["Rest here", "Hunt for food", "Continue on"],
                     captain_id=party.captain_id,
                     captain_default="Continue on",
@@ -479,6 +516,72 @@ class PartyEngine:
                     self._worsen_health(players[pid])
             msg += " The rough going has exhausted the party."
 
+        elif event_id == "heavy_fog":
+            # Lose 1 day of travel (no miles gained today, handled by event)
+            party.inventory.food = max(0, party.inventory.food - 5)
+            msg += " You lost a day waiting for visibility to clear."
+
+        elif event_id == "blizzard":
+            # Severe: halt travel, health decline for all, food loss
+            party.inventory.food = max(0, party.inventory.food - 20)
+            for pid in party.member_ids:
+                if players[pid].is_alive:
+                    self._worsen_health(players[pid])
+                    # Extra damage if clothing is insufficient
+                    alive_count = len([p for p in party.member_ids if players[p].is_alive])
+                    if party.inventory.clothing < alive_count:
+                        self._worsen_health(players[pid])
+            msg += " The blizzard has caused severe damage. The party is trapped!"
+
+        elif event_id == "no_grass":
+            # Oxen starve, reduced effectiveness
+            if party.inventory.oxen > 0 and self._roll_probability(0.3):
+                party.inventory.oxen = max(0, party.inventory.oxen - 1)
+                msg += " An ox has weakened and died from lack of food."
+            else:
+                msg += " The oxen are suffering. Travel will be slower."
+
+        elif event_id == "abandoned_wagon":
+            # Gain random supplies
+            gains = []
+            food_found = self.rng.randint(10, 50)
+            party.inventory.food += food_found
+            gains.append(f"{food_found} lbs food")
+            if self._roll_probability(0.5):
+                clothes = self.rng.randint(1, 3)
+                party.inventory.clothing += clothes
+                gains.append(f"{clothes} sets of clothing")
+            if self._roll_probability(0.3):
+                bullets = self.rng.randint(10, 40)
+                party.inventory.bullets += bullets
+                gains.append(f"{bullets} bullets")
+            if self._roll_probability(0.2):
+                part_type = self.rng.choice(["wagon_wheels", "wagon_axles", "wagon_tongues"])
+                current = getattr(party.inventory, part_type)
+                if current < MAX_SPARE_PARTS:
+                    setattr(party.inventory, part_type, current + 1)
+                    gains.append(f"1 spare {part_type.replace('_', ' ').rstrip('s')}")
+            msg += f" You salvaged: {', '.join(gains)}."
+
+        elif event_id == "npc_trade":
+            # NPC offers a trade — randomly beneficial or slightly unfavorable
+            trades = [
+                ("food", 30, "clothing", 2, "30 lbs of food for 2 sets of clothing"),
+                ("bullets", 20, "food", 25, "20 bullets for 25 lbs of food"),
+                ("clothing", 3, "bullets", 30, "3 sets of clothing for 30 bullets"),
+            ]
+            trade = self.rng.choice(trades)
+            give_item, give_qty, get_item, get_qty, description = trade
+            # Check if party has enough to trade
+            current_give = getattr(party.inventory, give_item, 0)
+            if current_give >= give_qty:
+                setattr(party.inventory, give_item, current_give - give_qty)
+                current_get = getattr(party.inventory, get_item, 0)
+                setattr(party.inventory, get_item, current_get + get_qty)
+                msg += f" You traded {description}."
+            else:
+                msg += f" They wanted {description}, but you didn't have enough to trade."
+
         return party, players, msg
 
     # ------------------------------------------------------------------
@@ -498,21 +601,54 @@ class PartyEngine:
         rations_impact = RATIONS_HEALTH_IMPACT[party.rations]
         weather_impact = WEATHER_HEALTH_IMPACT[weather]
 
-        # Food shortage penalty
+        # Clothing shortage in cold weather (original: inadequate clothing
+        # in cold/mountains causes rapid health drops)
+        clothing_penalty = 0
+        if weather in (Weather.COLD, Weather.VERY_COLD, Weather.SNOW):
+            clothing_needed = len(alive_members)
+            if party.inventory.clothing < clothing_needed:
+                # Not enough clothing sets for the party
+                clothing_penalty = -1
+                if weather == Weather.VERY_COLD or weather == Weather.SNOW:
+                    clothing_penalty = -2
+                events.append({
+                    "type": "trail_event",
+                    "event_id": "cold_exposure",
+                    "message": "Inadequate clothing! The party suffers in the cold.",
+                })
+
+        # Food shortage penalty — escalates the longer food is at zero
         food_penalty = 0
         if party.inventory.food <= 0:
-            food_penalty = -2
+            # Track consecutive days without food
+            starvation_days = getattr(party, '_starvation_days', 0) + 1
+            party._starvation_days = starvation_days
+            if starvation_days >= 10:
+                food_penalty = -4  # Severe — deaths imminent
+            elif starvation_days >= 5:
+                food_penalty = -3  # Dire
+            else:
+                food_penalty = -2  # Bad
+            if starvation_days >= 3:
+                events.append({
+                    "type": "trail_event",
+                    "event_id": "starvation",
+                    "message": f"The party is starving! No food for {starvation_days} days.",
+                })
+        else:
+            party._starvation_days = 0
 
         for pid in alive_members:
             player = players[pid]
             # Apply daily health drift
-            total_impact = pace_impact + rations_impact + weather_impact + food_penalty
+            total_impact = pace_impact + rations_impact + weather_impact + food_penalty + clothing_penalty
 
             # Random variance
             total_impact += self.rng.randint(-1, 1)
 
             if total_impact < 0:
-                steps = min(abs(total_impact), 1)  # Cap daily health loss to max 1 step per day
+                # Allow up to 2 steps of health loss per day for severe conditions
+                steps = min(abs(total_impact), 2)
                 for _ in range(steps):
                     self._worsen_health(player)
             elif total_impact > 0:
@@ -584,11 +720,33 @@ class PartyEngine:
     def _check_deaths(
         self, party: Party, players: Dict[str, Player], current_date: date
     ) -> List[Dict[str, Any]]:
-        """Check if any players have died today."""
+        """Check if any players have died today.
+        
+        Original mechanic: the wagon leader (captain) only becomes vulnerable
+        to death after ALL other party members have died.
+        """
         events = []
+        
+        # Determine who's dying today (excluding captain protection logic)
         for pid in party.member_ids:
             player = players[pid]
             if player.is_alive and player.health_status == HealthStatus.DEAD:
+                # Wagon leader dies last: if this is the captain and others
+                # are still alive, bounce back to Very Poor instead of dying
+                if pid == party.captain_id:
+                    other_alive = [
+                        p for p in party.member_ids 
+                        if p != pid and players[p].is_alive
+                    ]
+                    if other_alive:
+                        player.health_status = HealthStatus.VERY_POOR
+                        events.append({
+                            "type": "trail_event",
+                            "event_id": "captain_near_death",
+                            "message": f"{player.name} is gravely ill but clings to life for the party.",
+                        })
+                        continue
+
                 player.is_alive = False
                 cause = self.rng.choice([
                     "dysentery", "exhaustion", "cholera", "measles",
@@ -688,14 +846,25 @@ class PartyEngine:
                 party.status = "traveling"
 
         elif decision.decision_type == DecisionType.RIVER_METHOD:
-            party.status = "traveling"  # Will be processed by river crossing handler
-            events.append({"type": "decision", "message": f"River crossing method: {choice}."})
+            if "Indian guide" in choice or "indian guide" in choice.lower():
+                # Hire an Indian guide — costs $5, reduces risk by ~80%
+                guide_cost = 5
+                if party.inventory.money >= guide_cost:
+                    party.inventory.money -= guide_cost
+                    party.status = "traveling"
+                    events.append({"type": "decision", "message": f"You hired an Indian guide for ${guide_cost}. They led you safely across the river."})
+                else:
+                    party.status = "traveling"
+                    events.append({"type": "decision", "message": "You couldn't afford the guide. Attempting to ford instead..."})
+            else:
+                party.status = "traveling"  # Will be processed by river crossing handler
+                events.append({"type": "decision", "message": f"River crossing method: {choice}."})
 
         elif decision.decision_type == DecisionType.BUY_SUPPLIES:
             if choice == "Buy supplies":
-                party.status = "decision"
-                # Would trigger store UI; for now just continue
-                party.status = "traveling"
+                # Set status to outfitting so the store UI can be shown
+                party.status = "outfitting"
+                events.append({"type": "decision", "message": "You browse the fort's store."})
             else:
                 party.status = "traveling"
 
@@ -707,21 +876,71 @@ class PartyEngine:
             party.status = "traveling"
 
         elif decision.decision_type == DecisionType.TAKE_SHORTCUT:
-            if choice == "Take shortcut":
-                # Risk/reward shortcut
-                if self._roll_probability(0.4):
-                    party.distance_traveled += 20
-                    events.append({"type": "decision", "message": "Shortcut saved time!"})
+            # Handle South Pass and The Dalles branch decisions
+            if "Fort Bridger" in choice:
+                # Safer route via Fort Bridger (default path in landmarks)
+                events.append({"type": "decision", "message": "You head toward Fort Bridger. A longer but safer route with supplies ahead."})
+                party.status = "traveling"
+            elif "Green River" in choice:
+                # Shortcut — shorter but riskier, skip Fort Bridger
+                events.append({"type": "decision", "message": "You take the Green River shortcut. The trail is rough but shorter."})
+                # Skip ahead past Fort Bridger (jump distance closer to Green River)
+                party.distance_traveled = max(party.distance_traveled, 1100)
+                # Risk: health penalty for the rough shortcut
+                for pid in party.member_ids:
+                    if players[pid].is_alive and self._roll_probability(0.3):
+                        self._worsen_health(players[pid])
+                party.status = "traveling"
+            elif "Barlow" in choice or "Toll Road" in choice:
+                # Pay the toll, safer overland route
+                if party.inventory.money >= BARLOW_TOLL_ROAD_COST:
+                    party.inventory.money -= BARLOW_TOLL_ROAD_COST
+                    events.append({"type": "decision", "message": f"You paid ${BARLOW_TOLL_ROAD_COST} for the Barlow Toll Road. The final stretch is tough but manageable."})
                 else:
-                    party.distance_traveled = max(0, party.distance_traveled - 10)
-                    # 50% chance per member to be affected by the bad shortcut
-                    for pid in party.member_ids:
-                        if players[pid].is_alive and self._roll_probability(0.5):
-                            self._worsen_health(players[pid])
-                    events.append({"type": "decision", "message": "Shortcut was a dead end! Lost time and health."})
+                    events.append({"type": "decision", "message": "You can't afford the toll! You must float down the Columbia River."})
+                    # Fall through to Columbia River logic
+                    if self._roll_probability(0.4):
+                        lost_food = min(party.inventory.food, self.rng.randint(30, 80))
+                        party.inventory.food -= lost_food
+                        events.append({"type": "trail_event", "event_id": "columbia_mishap", "message": f"The raft struck rocks! Lost {lost_food} lbs of food."})
+                        alive = [pid for pid in party.member_ids if players[pid].is_alive]
+                        if alive and self._roll_probability(0.2):
+                            victim = self.rng.choice(alive)
+                            self._worsen_health(players[victim])
+                            self._worsen_health(players[victim])
+                            events.append({"type": "trail_event", "event_id": "columbia_injury", "message": f"{players[victim].name} was injured by the rapids!"})
+                party.status = "traveling"
+            elif "Columbia" in choice or "float" in choice.lower():
+                # Float the Columbia — free but dangerous
+                events.append({"type": "decision", "message": "You build a raft and float down the Columbia River!"})
+                if self._roll_probability(0.4):
+                    lost_food = min(party.inventory.food, self.rng.randint(30, 80))
+                    party.inventory.food -= lost_food
+                    events.append({"type": "trail_event", "event_id": "columbia_mishap", "message": f"The raft struck rocks! Lost {lost_food} lbs of food."})
+                    alive = [pid for pid in party.member_ids if players[pid].is_alive]
+                    if alive and self._roll_probability(0.2):
+                        victim = self.rng.choice(alive)
+                        self._worsen_health(players[victim])
+                        self._worsen_health(players[victim])
+                        events.append({"type": "trail_event", "event_id": "columbia_injury", "message": f"{players[victim].name} was injured by the rapids!"})
+                else:
+                    events.append({"type": "decision", "message": "The river ride was exhilarating! You made it through safely."})
+                party.status = "traveling"
             else:
-                events.append({"type": "decision", "message": "Stayed on the main trail."})
-            party.status = "traveling"
+                # Generic shortcut (fallback for any old-style shortcut decisions)
+                if "Take shortcut" in choice:
+                    if self._roll_probability(0.4):
+                        party.distance_traveled += 20
+                        events.append({"type": "decision", "message": "Shortcut saved time!"})
+                    else:
+                        party.distance_traveled = max(0, party.distance_traveled - 10)
+                        for pid in party.member_ids:
+                            if players[pid].is_alive and self._roll_probability(0.5):
+                                self._worsen_health(players[pid])
+                        events.append({"type": "decision", "message": "Shortcut was a dead end! Lost time and health."})
+                else:
+                    events.append({"type": "decision", "message": "Stayed on the main trail."})
+                party.status = "traveling"
 
         party.decision_pending = None
         return party, players, events
@@ -858,6 +1077,20 @@ class PartyEngine:
         """Buy items at a store. Returns (party, result)."""
         result = {"success": False, "message": ""}
         from game_data import STORE_PRICES
+
+        # Check for spare parts caps
+        if item in ("wagon_wheel", "wagon_axle", "wagon_tongue"):
+            current_parts = 0
+            if item == "wagon_wheel":
+                current_parts = party.inventory.wagon_wheels
+            elif item == "wagon_axle":
+                current_parts = party.inventory.wagon_axles
+            elif item == "wagon_tongue":
+                current_parts = party.inventory.wagon_tongues
+            
+            if current_parts + quantity > MAX_SPARE_PARTS:
+                result["message"] = f"You can't carry more than {MAX_SPARE_PARTS} {item.replace('_', ' ')}s."
+                return party, result
 
         base_price = STORE_PRICES.get(item, 0)
         if base_price <= 0:
