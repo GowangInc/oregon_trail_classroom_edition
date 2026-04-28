@@ -98,19 +98,21 @@ def on_connect(auth):
             session_id = player_to_session[player_id]
             mgr = sessions.get(session_id)
             if mgr:
-                sid_to_player[request.sid] = player_id
-                mgr.session.players[player_id].socket_id = request.sid
-                mgr._host_sid = request.sid
-                join_room("global")
-                emit("connected", {
-                    "player_id": player_id,
-                    "session_id": mgr.session.session_id,
-                    "session_code": mgr.session.session_code,
-                    "is_host": True,
-                })
-                emit("session_state", _host_state(mgr))
-                print(f"[{datetime.now()}] Host {player_id} reconnected to session {mgr.session.session_code}")
-                return
+                stored_player = mgr.session.players.get(player_id)
+                if stored_player and stored_player.is_host:
+                    sid_to_player[request.sid] = player_id
+                    mgr.session.players[player_id].socket_id = request.sid
+                    mgr._host_sid = request.sid
+                    join_room("global")
+                    emit("connected", {
+                        "player_id": player_id,
+                        "session_id": mgr.session.session_id,
+                        "session_code": mgr.session.session_code,
+                        "is_host": True,
+                    })
+                    emit("session_state", _host_state(mgr))
+                    print(f"[{datetime.now()}] Host {player_id} reconnected to session {mgr.session.session_code}")
+                    return
 
         # New host connection: require password
         if auth.get("host_password") != "admin":
@@ -143,22 +145,25 @@ def on_connect(auth):
         session_id = player_to_session[player_id]
         mgr = sessions.get(session_id)
         if mgr:
-            player = mgr.reconnect_player(player_id, request.sid)
-            if player:
-                sid_to_player[request.sid] = player_id
-                join_room("global")
-                if player.party_id:
-                    join_room(f"party_{player.party_id}")
-                emit("connected", {
-                    "player_id": player_id,
-                    "session_id": session_id,
-                    "session_code": mgr.session.session_code,
-                    "is_host": player.is_host,
-                })
-                # Send current state
-                emit("session_state", mgr.get_player_state(player_id))
-                print(f"[{datetime.now()}] Player {player.name} reconnected")
-                return
+            stored_player = mgr.session.players.get(player_id)
+            # Only reconnect if the stored player is NOT the host
+            if stored_player and not stored_player.is_host:
+                player = mgr.reconnect_player(player_id, request.sid)
+                if player:
+                    sid_to_player[request.sid] = player_id
+                    join_room("global")
+                    if player.party_id:
+                        join_room(f"party_{player.party_id}")
+                    emit("connected", {
+                        "player_id": player_id,
+                        "session_id": session_id,
+                        "session_code": mgr.session.session_code,
+                        "is_host": player.is_host,
+                    })
+                    # Send current state
+                    emit("session_state", mgr.get_player_state(player_id))
+                    print(f"[{datetime.now()}] Player {player.name} reconnected")
+                    return
 
     # New player connection (no player_id yet)
     emit("connected", {"player_id": None, "session_id": None})
@@ -728,13 +733,23 @@ def on_new_session(data=None):
         return
 
     _stop_auto_advance(mgr)
+    old_session_id = mgr.session.session_id
+    
+    # Notify old clients to refresh
+    socketio.emit("error", {"message": "The host started a new session. Please refresh."}, room="global", skip_sid=request.sid)
+
     mgr.new_session()
+    
+    # Remove old session ID and add the new one
+    if old_session_id in sessions:
+        del sessions[old_session_id]
+    sessions[mgr.session.session_id] = mgr
+
     # Reconnect host to the new session
     sid_to_player[request.sid] = host_id
     player_to_session[host_id] = mgr.session.session_id
     mgr.session.players[host_id].socket_id = request.sid
     mgr._host_sid = request.sid
-    sessions[mgr.session.session_id] = mgr
 
     emit("connected", {
         "player_id": host_id,
