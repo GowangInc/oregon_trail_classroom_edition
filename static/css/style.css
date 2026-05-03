@@ -10,6 +10,8 @@
     --term-danger: #ff4444;
     --term-warn: #ffaa00;
     --term-info: #44aaff;
+    --term-font: 'VT323', monospace;
+    --term-highlight: #aaffaa;
 }
 
 * {

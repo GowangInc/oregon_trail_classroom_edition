@@ -10,7 +10,7 @@ from flask import Flask, render_template, request
 from flask_socketio import SocketIO, join_room, leave_room, emit, ConnectionRefusedError
 
 from session_manager import SessionManager
-from game_data import DEFAULT_AUTO_ADVANCE_INTERVAL, contains_swear, filter_swear
+from game_data import DEFAULT_AUTO_ADVANCE_INTERVAL, contains_swear, filter_swear, Profession
 
 # ---------------------------------------------------------------------------
 # Flask & SocketIO Setup

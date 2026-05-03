@@ -162,6 +162,7 @@ class Decision:
             "votes": self.votes,
             "captain_id": self.captain_id,
             "captain_default": self.captain_default,
+            "created_at": self.created_at.isoformat(),
             "timeout_seconds": self.timeout_seconds,
             "resolved": self.resolved,
             "result": self.result,
@@ -242,12 +243,7 @@ class Party:
     last_vote_called_at: float = 0.0
     start_month: int = 5  # Default May
 
-    @property
-    def is_alive(self) -> bool:
-        """Party is alive if any member is alive."""
-        # Note: This requires external lookup of player health.
-        # Set externally by engine when computing.
-        return True
+    is_alive: bool = True
 
     def to_dict(self, include_private: bool = True) -> Dict[str, Any]:
         data = {
@@ -273,6 +269,7 @@ class Party:
             "score": self.score,
             "hunting_region_depletion": self.hunting_region_depletion,
             "start_month": self.start_month,
+            "is_alive": self.is_alive,
         }
         if include_private:
             data["inventory"] = self.inventory.to_dict()
