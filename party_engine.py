@@ -85,6 +85,10 @@ class PartyEngine:
     def _roll_probability(self, probability: float) -> bool:
         return self.rng.random() < probability
 
+    def _adjust_morale(self, party: Party, delta: int) -> None:
+        """Adjust morale by delta and clamp to 0-100."""
+        party.morale = max(0, min(100, party.morale + delta))
+
     def _weighted_choice(self, choices: List[Tuple[Any, int]]) -> Any:
         """Choose from a list of (item, weight) tuples."""
         total = sum(w for _, w in choices)
@@ -301,6 +305,10 @@ class PartyEngine:
         alive_members = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
         food_consumed = self._consume_food(party, len(alive_members))
 
+        # Low food morale penalty
+        if party.inventory.food < 50:
+            self._adjust_morale(party, -5)
+
         if not decision_pending:
             # 3. Random trail events
             event_results = self._roll_trail_events(party, global_weather, terrain)
@@ -320,6 +328,11 @@ class PartyEngine:
         # 6. Check for nearby tombstones from other parties
         tombstone_events = self._check_tombstone_proximity(party)
         events.extend(tombstone_events)
+
+        # Very low health morale penalty
+        alive_members = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
+        if any(players[pid].health_status == HealthStatus.VERY_POOR for pid in alive_members):
+            self._adjust_morale(party, -5)
 
         if not decision_pending:
             # 7. Periodic travel decisions (every 5 days of travel)
@@ -371,6 +384,7 @@ class PartyEngine:
 
             if party.miles_to_next <= 0:
                 # Reached a landmark
+                self._adjust_morale(party, 5)
                 party.days_at_current_location = 0
                 events.append({
                     "type": "landmark",
@@ -526,6 +540,13 @@ class PartyEngine:
         oxen_factor = min(1.0, party.inventory.oxen / 4)
 
         miles = int(base_miles * weather_mod * terrain_mod * oxen_factor)
+
+        # Morale effects on travel speed
+        if party.morale > 75:
+            miles = int(miles * 1.05)
+        elif party.morale < 25:
+            miles = int(miles * 0.90)
+
         return max(0, miles)
 
     # ------------------------------------------------------------------
@@ -744,6 +765,16 @@ class PartyEngine:
             else:
                 msg += f" They wanted {description}, but you didn't have enough to trade."
 
+        # Morale penalty for negative trail events
+        negative_events = {
+            "broken_wheel", "broken_axle", "broken_tongue",
+            "oxen_injured", "oxen_died", "thief", "bad_water",
+            "lost_trail", "rough_trail", "heavy_fog", "blizzard",
+            "no_grass", "wrong_path",
+        }
+        if event_id in negative_events:
+            self._adjust_morale(party, -10)
+
         return party, players, msg
 
     # ------------------------------------------------------------------
@@ -818,9 +849,10 @@ class PartyEngine:
             elif total_impact > 0:
                 self._improve_health(player)
 
-            # Passive recovery: if conditions are decent, small chance to improve
+            # Passive recovery: if conditions are decent, chance to improve
             if total_impact == 0 and player.health_status != HealthStatus.HEALTHY:
-                if self._roll_probability(0.3):
+                recovery_chance = 0.3 + (party.morale / 200)
+                if self._roll_probability(recovery_chance):
                     self._improve_health(player)
 
             # Illness check
@@ -829,6 +861,7 @@ class PartyEngine:
                 # Illness worsens health by 2 steps instead of instantly dropping to VERY_POOR
                 self._worsen_health(player)
                 self._worsen_health(player)
+                self._adjust_morale(party, -5)
                 events.append({
                     "type": "illness",
                     "player_id": pid,
@@ -874,11 +907,15 @@ class PartyEngine:
 
     def _apply_rest_recovery(self, party: Party, players: Dict[str, Player]):
         """Improve health during rest days."""
+        self._adjust_morale(party, 10)
         for pid in party.member_ids:
             if pid in players and players[pid].is_alive:
                 self._improve_health(players[pid])
                 # Second improvement if very poor
                 if players[pid].health_status == HealthStatus.VERY_POOR and self._roll_probability(0.5):
+                    self._improve_health(players[pid])
+                # Extra recovery chance if morale is high
+                if party.morale > 50 and players[pid].health_status != HealthStatus.HEALTHY and self._roll_probability(0.3):
                     self._improve_health(players[pid])
 
     def _check_deaths(
@@ -914,6 +951,7 @@ class PartyEngine:
                         continue
 
                 player.is_alive = False
+                self._adjust_morale(party, -20)
                 cause = self.rng.choice([
                     "dysentery", "exhaustion", "cholera", "measles",
                     "typhoid fever", "a snakebite", "starvation", "hypothermia"
@@ -1142,6 +1180,9 @@ class PartyEngine:
         party.hunting_region_depletion = min(1.0, party.hunting_region_depletion + 0.15)
         party.status = "traveling"
 
+        if food_gained >= 50:
+            self._adjust_morale(party, 10)
+
         result["shots_fired"] = shots_hit
         result["food_gained"] = food_gained
         result["message"] = f"Hunting successful! Gained {food_gained} lbs of food using {bullets_needed} bullets."
@@ -1200,6 +1241,7 @@ class PartyEngine:
 
         if outcome == "perfect":
             result["message"] += "Perfect crossing! The river was calm and the crossing went smoothly."
+            self._adjust_morale(party, 15)
             alive = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
             if alive:
                 bonus_victim = self.rng.choice(alive)
@@ -1219,6 +1261,7 @@ class PartyEngine:
 
         elif outcome == "near_disaster":
             result["success"] = False
+            self._adjust_morale(party, -15)
             # Major supply loss
             lost_food = min(party.inventory.food, self.rng.randint(50, 150))
             lost_clothes = min(party.inventory.clothing, self.rng.randint(1, 3))
@@ -1242,6 +1285,7 @@ class PartyEngine:
 
         elif outcome == "disaster":
             result["success"] = False
+            self._adjust_morale(party, -15)
             # Catastrophic failure: major supply loss
             lost_food = min(party.inventory.food, self.rng.randint(100, 200))
             lost_clothes = min(party.inventory.clothing, self.rng.randint(2, 5))
@@ -1349,6 +1393,7 @@ class PartyEngine:
         score += int(party.inventory.food * SCORE_PER_50_FOOD / 50)
         score += party.inventory.clothing * SCORE_PER_CLOTHING
         score += int(party.inventory.bullets * SCORE_PER_BULLET)
+        score += int(party.morale / 10)
 
         profession_mult = {
             Profession.BANKER: 1,

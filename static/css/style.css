@@ -551,6 +551,10 @@ h1, h2, h3 {
 .stat-health-verypoor { color: var(--health-verypoor); text-shadow: 0 0 8px rgba(213, 94, 0, 0.4); }
 .stat-health-dead { color: var(--health-dead); text-shadow: 0 0 8px rgba(204, 121, 167, 0.5); }
 
+.stat-morale-high { color: var(--health-good); text-shadow: 0 0 5px var(--term-glow); }
+.stat-morale-medium { color: var(--health-poor); text-shadow: 0 0 5px rgba(230, 159, 0, 0.3); }
+.stat-morale-low { color: var(--health-verypoor); text-shadow: 0 0 8px rgba(213, 94, 0, 0.4); }
+
 .stat-food-critical {
     color: var(--term-danger);
     animation: pulse-food 1s ease-in-out infinite;

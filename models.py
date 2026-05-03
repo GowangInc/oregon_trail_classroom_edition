@@ -244,6 +244,7 @@ class Party:
     hunting_region_depletion: float = 0.0  # 0.0 to 1.0
     last_vote_called_at: float = 0.0
     start_month: int = 5  # Default May
+    morale: int = 50  # 0-100
 
     is_alive: bool = True
 
@@ -271,6 +272,7 @@ class Party:
             "score": self.score,
             "hunting_region_depletion": self.hunting_region_depletion,
             "start_month": self.start_month,
+            "morale": self.morale,
             "is_alive": self.is_alive,
         }
         if include_private:
@@ -294,6 +296,7 @@ class Party:
             outfitting_complete=data.get("outfitting_complete", False),
             travel_days_since_decision=data.get("travel_days_since_decision", 0),
             start_month=data.get("start_month", 5),
+            morale=data.get("morale", 50),
         )
         if "inventory" in data:
             party.inventory = Inventory.from_dict(data["inventory"])

@@ -32,6 +32,7 @@ const els = {
     statMiles: document.getElementById('stat-miles'),
     statFood: document.getElementById('stat-food'),
     statHealth: document.getElementById('stat-health'),
+    statMorale: document.getElementById('stat-morale'),
     gameoverTitle: document.getElementById('gameover-title'),
     gameoverMessage: document.getElementById('gameover-message'),
     gameoverStats: document.getElementById('gameover-stats'),
@@ -131,6 +132,17 @@ function updateGame(state, myPlayerId) {
     // Status Bar Weather Styling
     els.statWeather.className = 'highlight ' + Effects.getWeatherClass(state.global_weather);
     
+    // Morale
+    const morale = party.morale !== undefined ? party.morale : 50;
+    els.statMorale.textContent = morale;
+    if (morale >= 75) {
+        els.statMorale.className = 'highlight stat-morale-high';
+    } else if (morale >= 40) {
+        els.statMorale.className = 'highlight stat-morale-medium';
+    } else {
+        els.statMorale.className = 'highlight stat-morale-low';
+    }
+
     // Food Warning
     const food = party.inventory ? party.inventory.food : 0;
     if (food <= 0) {
