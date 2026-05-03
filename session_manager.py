@@ -284,7 +284,7 @@ class SessionManager:
                         engine = self.engines.get(party.party_id)
                         if engine:
                             players = self._get_party_players(party)
-                            party, players, _ = engine.apply_decision(party, players, winner)
+                            party, players, _ = engine.apply_decision(party, players, winner, river_depth=self._compute_river_depth())
                             self._update_party_and_players(party, players)
 
             # 2. Tick each active party
@@ -501,7 +501,7 @@ class SessionManager:
                 return False
 
             players = self._get_party_players(party)
-            party, players, _ = engine.apply_decision(party, players, choice)
+            party, players, _ = engine.apply_decision(party, players, choice, river_depth=self._compute_river_depth())
             self._update_party_and_players(party, players)
             return True
 

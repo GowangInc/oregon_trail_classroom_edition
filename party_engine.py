@@ -131,7 +131,7 @@ class PartyEngine:
         # If a decision is still pending, resolve it with default and stop
         if party.decision_pending and not party.decision_pending.resolved:
             winner = party.decision_pending.get_winner()
-            party, players, ev = self.apply_decision(party, players, winner)
+            party, players, ev = self.apply_decision(party, players, winner, river_depth=3)
             events.extend(ev)
             # If the decision was about resting, don't travel today
             if party.is_resting:
@@ -778,7 +778,7 @@ class PartyEngine:
     # Decision Application
     # ------------------------------------------------------------------
     def apply_decision(
-        self, party: Party, players: Dict[str, Player], choice: str
+        self, party: Party, players: Dict[str, Player], choice: str, river_depth: int = 3
     ) -> Tuple[Party, Dict[str, Player], List[Dict[str, Any]]]:
         """Apply a resolved decision to the party."""
         events = []
@@ -855,11 +855,12 @@ class PartyEngine:
                     party.status = "traveling"
                     events.append({"type": "decision", "message": f"You hired an Indian guide for ${guide_cost}. They led you safely across the river."})
                 else:
-                    party.status = "traveling"
-                    events.append({"type": "decision", "message": "You couldn't afford the guide. Attempting to ford instead..."})
+                    # Can't afford guide — attempt to ford instead
+                    party, players, result = self.resolve_river_crossing(party, players, "Ford the river", river_depth)
+                    events.append({"type": "river_crossing", "message": f"Couldn't afford the guide. {result['message']}", "losses": result.get("losses", [])})
             else:
-                party.status = "traveling"  # Will be processed by river crossing handler
-                events.append({"type": "decision", "message": f"River crossing method: {choice}."})
+                party, players, result = self.resolve_river_crossing(party, players, choice, river_depth)
+                events.append({"type": "river_crossing", "message": result["message"], "losses": result.get("losses", [])})
 
         elif decision.decision_type == DecisionType.BUY_SUPPLIES:
             if choice == "Buy supplies":
