@@ -458,7 +458,6 @@ function fireBullet() {
     if (bulletsLeft <= 0) return;
     initAudio();
     
-    bulletsLeft--;
     playGunshot();
     
     // Normalize direction

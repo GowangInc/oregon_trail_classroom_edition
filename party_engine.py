@@ -128,37 +128,36 @@ class PartyEngine:
             })
             return party, players, events
 
-        # If a decision is still pending, resolve it with default and stop
-        if party.decision_pending and not party.decision_pending.resolved:
-            winner = party.decision_pending.get_winner()
-            party, players, ev = self.apply_decision(party, players, winner, river_depth=3)
-            events.extend(ev)
-            # If the decision was about resting, don't travel today
-            if party.is_resting:
-                return party, players, events
+        # If a decision is pending, skip travel and new decision creation
+        decision_pending = party.decision_pending is not None and not party.decision_pending.resolved
 
-        # Clear any stale decision
-        party.decision_pending = None
+        if not decision_pending:
+            # Clear any stale decision
+            party.decision_pending = None
 
-        # 1. Travel
         terrain = self._get_terrain_at(party.distance_traveled)
-        miles_today = self._calculate_travel(party, global_weather, terrain)
-        if miles_today > 0:
-            party.distance_traveled = min(party.distance_traveled + miles_today, TOTAL_DISTANCE)
-            party.days_at_current_location = 0
-        else:
-            party.days_at_current_location += 1
+        miles_today = 0
+
+        if not decision_pending:
+            # 1. Travel
+            miles_today = self._calculate_travel(party, global_weather, terrain)
+            if miles_today > 0:
+                party.distance_traveled = min(party.distance_traveled + miles_today, TOTAL_DISTANCE)
+                party.days_at_current_location = 0
+            else:
+                party.days_at_current_location += 1
 
         # 2. Consume food
         alive_members = [pid for pid in party.member_ids if players[pid].is_alive]
         food_consumed = self._consume_food(party, len(alive_members))
 
-        # 3. Random trail events
-        event_results = self._roll_trail_events(party, global_weather, terrain)
-        for ev in event_results:
-            party, players, msg = self._apply_trail_event(party, players, ev)
-            if msg:
-                events.append({"type": "trail_event", "event_id": ev["id"], "message": msg})
+        if not decision_pending:
+            # 3. Random trail events
+            event_results = self._roll_trail_events(party, global_weather, terrain)
+            for ev in event_results:
+                party, players, msg = self._apply_trail_event(party, players, ev)
+                if msg:
+                    events.append({"type": "trail_event", "event_id": ev["id"], "message": msg})
 
         # 4. Health & illness
         party, players, health_events = self._update_health(party, players, global_weather)
@@ -172,138 +171,139 @@ class PartyEngine:
         tombstone_events = self._check_tombstone_proximity(party)
         events.extend(tombstone_events)
 
-        # 7. Periodic travel decisions (every 5 days of travel)
-        if miles_today > 0 and not party.decision_pending:
-            party.travel_days_since_decision += 1
-            if party.travel_days_since_decision >= 5:
-                party.travel_days_since_decision = 0
-                party.status = "decision"
+        if not decision_pending:
+            # 7. Periodic travel decisions (every 5 days of travel)
+            if miles_today > 0 and not party.decision_pending:
+                party.travel_days_since_decision += 1
+                if party.travel_days_since_decision >= 5:
+                    party.travel_days_since_decision = 0
+                    party.status = "decision"
 
-                # Alternate between travel actions and pace/rations review
-                decision_cycle = getattr(party, '_decision_cycle', 0)
-                party._decision_cycle = (decision_cycle + 1) % 3
+                    # Alternate between travel actions and pace/rations review
+                    decision_cycle = getattr(party, '_decision_cycle', 0)
+                    party._decision_cycle = (decision_cycle + 1) % 3
 
-                if party._decision_cycle == 0:
-                    # Pace/rations review every 3rd decision (~10-15 days)
+                    if party._decision_cycle == 0:
+                        # Pace/rations review every 3rd decision (~10-15 days)
+                        party.decision_pending = Decision(
+                            party_id=party.party_id,
+                            decision_type=DecisionType.PACE,
+                            prompt=f"Current pace: {party.pace.value}. Current rations: {party.rations.value}. What would you like to change?",
+                            options=[
+                                "Keep pace and rations",
+                                "Speed up (increase pace)",
+                                "Slow down (decrease pace)",
+                                "Increase rations",
+                                "Decrease rations",
+                            ],
+                            captain_id=party.captain_id,
+                            captain_default="Keep pace and rations",
+                            timeout_seconds=5,
+                        )
+                    else:
+                        # Regular travel decision: hunt, rest, or continue
+                        party.decision_pending = Decision(
+                            party_id=party.party_id,
+                            decision_type=DecisionType.REST,
+                            prompt="The trail stretches ahead. What would the party like to do?",
+                            options=["Continue on", "Hunt for food", "Rest for a day"],
+                            captain_id=party.captain_id,
+                            captain_default="Continue on",
+                            timeout_seconds=5,
+                        )
+
+            # 9. Check landmark arrival
+            next_idx, next_lm = self._get_next_landmark(party.distance_traveled)
+            party.miles_to_next = next_lm.miles_from_start - party.distance_traveled
+            party.current_landmark_index = next_idx - 1 if next_idx > 0 else 0
+
+            if party.miles_to_next <= 0:
+                # Reached a landmark
+                party.days_at_current_location = 0
+                events.append({
+                    "type": "landmark",
+                    "message": f"{party.party_name} has reached {next_lm.name}!",
+                    "landmark": next_lm.name,
+                    "description": next_lm.description,
+                    "is_fort": next_lm.is_fort,
+                    "is_river": next_lm.is_river,
+                })
+                if next_lm.name == "Willamette Valley, Oregon":
+                    party.status = "finished"
+                    events.append({
+                        "type": "finished",
+                        "message": f"{party.party_name} has reached Oregon!",
+                    })
+
+                # --- BRANCH POINT: South Pass ---
+                elif next_lm.name == "South Pass":
+                    party.status = "decision"
+                    party.travel_days_since_decision = 0
                     party.decision_pending = Decision(
                         party_id=party.party_id,
-                        decision_type=DecisionType.PACE,
-                        prompt=f"Current pace: {party.pace.value}. Current rations: {party.rations.value}. What would you like to change?",
-                        options=[
-                            "Keep pace and rations",
-                            "Speed up (increase pace)",
-                            "Slow down (decrease pace)",
-                            "Increase rations",
-                            "Decrease rations",
-                        ],
+                        decision_type=DecisionType.TAKE_SHORTCUT,
+                        prompt="You have reached the Continental Divide at South Pass. Which route will you take?",
+                        options=["Head to Fort Bridger (safer, fort ahead)", "Take the Green River shortcut (shorter, riskier)"],
                         captain_id=party.captain_id,
-                        captain_default="Keep pace and rations",
+                        captain_default="Head to Fort Bridger (safer, fort ahead)",
+                        timeout_seconds=10,
+                    )
+
+                # --- BRANCH POINT: The Dalles ---
+                elif next_lm.name == "The Dalles":
+                    party.status = "decision"
+                    party.travel_days_since_decision = 0
+                    toll_cost = BARLOW_TOLL_ROAD_COST
+                    party.decision_pending = Decision(
+                        party_id=party.party_id,
+                        decision_type=DecisionType.TAKE_SHORTCUT,
+                        prompt=f"The Dalles — the end of the overland trail. You must find a way to the Willamette Valley. The Barlow Toll Road costs ${toll_cost}.",
+                        options=[f"Take the Barlow Toll Road (${toll_cost}, safer)", "Float down the Columbia River (free, dangerous)"],
+                        captain_id=party.captain_id,
+                        captain_default=f"Take the Barlow Toll Road (${toll_cost}, safer)",
+                        timeout_seconds=10,
+                    )
+
+                elif next_lm.is_river:
+                    party.status = "river_crossing"
+                    party.travel_days_since_decision = 0
+                    # Snake River gets an Indian guide option
+                    options = ["Ford the river", "Caulk the wagon", "Take a ferry", "Wait for better conditions"]
+                    if next_lm.name == "Snake River Crossing":
+                        options.insert(2, "Hire an Indian guide ($5)")
+                    party.decision_pending = Decision(
+                        party_id=party.party_id,
+                        decision_type=DecisionType.RIVER_METHOD,
+                        prompt=f"You must cross the {next_lm.name}. {next_lm.description} How will you proceed?",
+                        options=options,
+                        captain_id=party.captain_id,
+                        captain_default="Ford the river",
                         timeout_seconds=5,
                     )
-                else:
-                    # Regular travel decision: hunt, rest, or continue
+                elif next_lm.is_fort:
+                    party.status = "decision"
+                    party.travel_days_since_decision = 0
                     party.decision_pending = Decision(
                         party_id=party.party_id,
-                        decision_type=DecisionType.REST,
-                        prompt="The trail stretches ahead. What would the party like to do?",
-                        options=["Continue on", "Hunt for food", "Rest for a day"],
+                        decision_type=DecisionType.BUY_SUPPLIES,
+                        prompt=f"You have reached {next_lm.name}. {next_lm.description} Would you like to buy supplies?",
+                        options=["Buy supplies", "Continue on"],
                         captain_id=party.captain_id,
                         captain_default="Continue on",
                         timeout_seconds=5,
                     )
-
-        # 9. Check landmark arrival
-        next_idx, next_lm = self._get_next_landmark(party.distance_traveled)
-        party.miles_to_next = next_lm.miles_from_start - party.distance_traveled
-        party.current_landmark_index = next_idx - 1 if next_idx > 0 else 0
-
-        if party.miles_to_next <= 0:
-            # Reached a landmark
-            party.days_at_current_location = 0
-            events.append({
-                "type": "landmark",
-                "message": f"{party.party_name} has reached {next_lm.name}!",
-                "landmark": next_lm.name,
-                "description": next_lm.description,
-                "is_fort": next_lm.is_fort,
-                "is_river": next_lm.is_river,
-            })
-            if next_lm.name == "Willamette Valley, Oregon":
-                party.status = "finished"
-                events.append({
-                    "type": "finished",
-                    "message": f"{party.party_name} has reached Oregon!",
-                })
-
-            # --- BRANCH POINT: South Pass ---
-            elif next_lm.name == "South Pass":
-                party.status = "decision"
-                party.travel_days_since_decision = 0
-                party.decision_pending = Decision(
-                    party_id=party.party_id,
-                    decision_type=DecisionType.TAKE_SHORTCUT,
-                    prompt="You have reached the Continental Divide at South Pass. Which route will you take?",
-                    options=["Head to Fort Bridger (safer, fort ahead)", "Take the Green River shortcut (shorter, riskier)"],
-                    captain_id=party.captain_id,
-                    captain_default="Head to Fort Bridger (safer, fort ahead)",
-                    timeout_seconds=10,
-                )
-
-            # --- BRANCH POINT: The Dalles ---
-            elif next_lm.name == "The Dalles":
-                party.status = "decision"
-                party.travel_days_since_decision = 0
-                toll_cost = BARLOW_TOLL_ROAD_COST
-                party.decision_pending = Decision(
-                    party_id=party.party_id,
-                    decision_type=DecisionType.TAKE_SHORTCUT,
-                    prompt=f"The Dalles — the end of the overland trail. You must find a way to the Willamette Valley. The Barlow Toll Road costs ${toll_cost}.",
-                    options=[f"Take the Barlow Toll Road (${toll_cost}, safer)", "Float down the Columbia River (free, dangerous)"],
-                    captain_id=party.captain_id,
-                    captain_default=f"Take the Barlow Toll Road (${toll_cost}, safer)",
-                    timeout_seconds=10,
-                )
-
-            elif next_lm.is_river:
-                party.status = "river_crossing"
-                party.travel_days_since_decision = 0
-                # Snake River gets an Indian guide option
-                options = ["Ford the river", "Caulk the wagon", "Take a ferry", "Wait for better conditions"]
-                if next_lm.name == "Snake River Crossing":
-                    options.insert(2, "Hire an Indian guide ($5)")
-                party.decision_pending = Decision(
-                    party_id=party.party_id,
-                    decision_type=DecisionType.RIVER_METHOD,
-                    prompt=f"You must cross the {next_lm.name}. {next_lm.description} How will you proceed?",
-                    options=options,
-                    captain_id=party.captain_id,
-                    captain_default="Ford the river",
-                    timeout_seconds=5,
-                )
-            elif next_lm.is_fort:
-                party.status = "decision"
-                party.travel_days_since_decision = 0
-                party.decision_pending = Decision(
-                    party_id=party.party_id,
-                    decision_type=DecisionType.BUY_SUPPLIES,
-                    prompt=f"You have reached {next_lm.name}. {next_lm.description} Would you like to buy supplies?",
-                    options=["Buy supplies", "Continue on"],
-                    captain_id=party.captain_id,
-                    captain_default="Continue on",
-                    timeout_seconds=5,
-                )
-            else:
-                party.status = "decision"
-                party.travel_days_since_decision = 0
-                party.decision_pending = Decision(
-                    party_id=party.party_id,
-                    decision_type=DecisionType.REST,
-                    prompt=f"You have reached {next_lm.name}. {next_lm.description} What would you like to do?",
-                    options=["Rest here", "Hunt for food", "Continue on"],
-                    captain_id=party.captain_id,
-                    captain_default="Continue on",
-                    timeout_seconds=5,
-                )
+                else:
+                    party.status = "decision"
+                    party.travel_days_since_decision = 0
+                    party.decision_pending = Decision(
+                        party_id=party.party_id,
+                        decision_type=DecisionType.REST,
+                        prompt=f"You have reached {next_lm.name}. {next_lm.description} What would you like to do?",
+                        options=["Rest here", "Hunt for food", "Continue on"],
+                        captain_id=party.captain_id,
+                        captain_default="Continue on",
+                        timeout_seconds=5,
+                    )
 
         # Check if all dead
         alive_members = [pid for pid in party.member_ids if players[pid].is_alive]

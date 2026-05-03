@@ -50,10 +50,11 @@ def _get_local_ip() -> str:
 
 def _host_state(mgr: SessionManager) -> dict:
     """Wrap host state with runtime server URL and tombstones so the UI can display them."""
-    state = mgr.get_host_state()
-    state["server_url"] = SERVER_URL
-    state["all_tombstones"] = [ts.to_dict() for ts in mgr.session.tombstones]
-    return state
+    with mgr.lock:
+        state = mgr.get_host_state()
+        state["server_url"] = SERVER_URL
+        state["all_tombstones"] = [ts.to_dict() for ts in mgr.session.tombstones]
+        return state
 
 
 # ---------------------------------------------------------------------------
@@ -98,21 +99,22 @@ def on_connect(auth):
             session_id = player_to_session[player_id]
             mgr = sessions.get(session_id)
             if mgr:
-                stored_player = mgr.session.players.get(player_id)
-                if stored_player and stored_player.is_host:
-                    sid_to_player[request.sid] = player_id
-                    mgr.session.players[player_id].socket_id = request.sid
-                    mgr._host_sid = request.sid
-                    join_room("global")
-                    emit("connected", {
-                        "player_id": player_id,
-                        "session_id": mgr.session.session_id,
-                        "session_code": mgr.session.session_code,
-                        "is_host": True,
-                    })
-                    emit("session_state", _host_state(mgr))
-                    print(f"[{datetime.now()}] Host {player_id} reconnected to session {mgr.session.session_code}")
-                    return
+                with mgr.lock:
+                    stored_player = mgr.session.players.get(player_id)
+                    if stored_player and stored_player.is_host:
+                        sid_to_player[request.sid] = player_id
+                        mgr.session.players[player_id].socket_id = request.sid
+                        mgr._host_sid = request.sid
+                        join_room("global")
+                        emit("connected", {
+                            "player_id": player_id,
+                            "session_id": mgr.session.session_id,
+                            "session_code": mgr.session.session_code,
+                            "is_host": True,
+                        })
+                        emit("session_state", _host_state(mgr))
+                        print(f"[{datetime.now()}] Host {player_id} reconnected to session {mgr.session.session_code}")
+                        return
 
         # New host connection: require password
         if auth.get("host_password") != "admin":
@@ -126,8 +128,9 @@ def on_connect(auth):
         sid_to_player[request.sid] = host_id
 
         # Update host socket id
-        mgr.session.players[host_id].socket_id = request.sid
-        mgr._host_sid = request.sid
+        with mgr.lock:
+            mgr.session.players[host_id].socket_id = request.sid
+            mgr._host_sid = request.sid
 
         join_room("global")
         emit("connected", {
@@ -145,25 +148,26 @@ def on_connect(auth):
         session_id = player_to_session[player_id]
         mgr = sessions.get(session_id)
         if mgr:
-            stored_player = mgr.session.players.get(player_id)
-            # Only reconnect if the stored player is NOT the host
-            if stored_player and not stored_player.is_host:
-                player = mgr.reconnect_player(player_id, request.sid)
-                if player:
-                    sid_to_player[request.sid] = player_id
-                    join_room("global")
-                    if player.party_id:
-                        join_room(f"party_{player.party_id}")
-                    emit("connected", {
-                        "player_id": player_id,
-                        "session_id": session_id,
-                        "session_code": mgr.session.session_code,
-                        "is_host": player.is_host,
-                    })
-                    # Send current state
-                    emit("session_state", mgr.get_player_state(player_id))
-                    print(f"[{datetime.now()}] Player {player.name} reconnected")
-                    return
+            with mgr.lock:
+                stored_player = mgr.session.players.get(player_id)
+                # Only reconnect if the stored player is NOT the host
+                if stored_player and not stored_player.is_host:
+                    player = mgr.reconnect_player(player_id, request.sid)
+                    if player:
+                        sid_to_player[request.sid] = player_id
+                        join_room("global")
+                        if player.party_id:
+                            join_room(f"party_{player.party_id}")
+                        emit("connected", {
+                            "player_id": player_id,
+                            "session_id": session_id,
+                            "session_code": mgr.session.session_code,
+                            "is_host": player.is_host,
+                        })
+                        # Send current state
+                        emit("session_state", mgr.get_player_state(player_id))
+                        print(f"[{datetime.now()}] Player {player.name} reconnected")
+                        return
 
     # New player connection (no player_id yet)
     emit("connected", {"player_id": None, "session_id": None})
@@ -182,14 +186,27 @@ def on_disconnect():
 
     mgr = sessions.get(session_id)
     if mgr:
-        # If host disconnects, clear _host_sid so broadcasts don't emit to dead socket
-        player = mgr.session.players.get(player_id)
-        if player and player.is_host and mgr._host_sid == request.sid:
-            mgr._host_sid = None
-            print(f"[{datetime.now()}] Host {player.name} disconnected, cleared _host_sid")
-        mgr.remove_player(player_id)
-        if player and not player.is_host:
-            print(f"[{datetime.now()}] Player {player.name} disconnected")
+        with mgr.lock:
+            # If host disconnects, clear _host_sid so broadcasts don't emit to dead socket
+            player = mgr.session.players.get(player_id)
+            if player and player.is_host and mgr._host_sid == request.sid:
+                mgr._host_sid = None
+                print(f"[{datetime.now()}] Host {player.name} disconnected, cleared _host_sid")
+            mgr.remove_player(player_id)
+            if player and not player.is_host:
+                print(f"[{datetime.now()}] Player {player.name} disconnected")
+            
+            # Purge stale sessions
+            if mgr.session.game_status == "ended":
+                all_disconnected = all(
+                    not p.socket_id for p in mgr.session.players.values()
+                )
+                if all_disconnected:
+                    for pid in list(mgr.session.players.keys()):
+                        if player_to_session.get(pid) == session_id:
+                            player_to_session.pop(pid, None)
+                    sessions.pop(session_id, None)
+                    print(f"[{datetime.now()}] Purged ended session {session_id}")
 
 
 # ---------------------------------------------------------------------------
@@ -369,43 +386,45 @@ def on_quick_start(data=None):
     if not mgr:
         return
 
-    # Create at least one party if none exist
-    if not mgr.session.parties:
-        mgr.create_party("Wagon Party 1")
+    with mgr.lock:
+        # Create at least one party if none exist
+        if not mgr.session.parties:
+            mgr.create_party("Wagon Party 1")
 
-    # Assign all unassigned players to parties evenly
-    mgr.shuffle_parties()
+        # Assign all unassigned players to parties evenly
+        mgr.shuffle_parties()
 
-    # Ensure parties are filled to 5 with NPCs
-    for party in list(mgr.session.parties.values()):
-        mgr.fill_party_with_npcs(party.party_id)
+        # Ensure parties are filled to 5 with NPCs
+        for party in list(mgr.session.parties.values()):
+            mgr.fill_party_with_npcs(party.party_id)
 
-    # Start outfitting phase
-    success = mgr.start_game()
-    if not success:
-        emit("error", {"message": "Cannot start game. Make sure at least one player has joined."})
-        return
+        # Start outfitting phase
+        success = mgr.start_game()
+        if not success:
+            emit("error", {"message": "Cannot start game. Make sure at least one player has joined."})
+            return
 
-    # Auto-outfit all parties with defaults and begin journey immediately
-    for party in list(mgr.session.parties.values()):
-        engine = mgr.engines.get(party.party_id)
-        if engine:
-            purchases = {
-                'oxen': 6,
-                'food': 400,
-                'clothing': 8,
-                'bullets': 4,
-                'wagon_wheel': 2,
-                'wagon_axle': 2,
-                'wagon_tongue': 2,
-            }
-            profession = party.profession or Profession.CARPENTER
-            party, _ = engine.outfit_party(party, profession, purchases)
-            party.outfitting_complete = True
-            mgr.session.parties[party.party_id] = party
+        # Auto-outfit all parties with defaults and begin journey immediately
+        for party in list(mgr.session.parties.values()):
+            engine = mgr.engines.get(party.party_id)
+            if engine:
+                purchases = {
+                    'oxen': 6,
+                    'food': 400,
+                    'clothing': 8,
+                    'bullets': 4,
+                    'wagon_wheel': 2,
+                    'wagon_axle': 2,
+                    'wagon_tongue': 2,
+                }
+                profession = party.profession or Profession.CARPENTER
+                party, _ = engine.outfit_party(party, profession, purchases)
+                party.outfitting_complete = True
+                mgr.session.parties[party.party_id] = party
 
-    mgr.begin_journey()
-    mgr.set_auto_advance(True, DEFAULT_AUTO_ADVANCE_INTERVAL)
+        mgr.begin_journey()
+        mgr.set_auto_advance(True, DEFAULT_AUTO_ADVANCE_INTERVAL)
+    
     _start_auto_advance(mgr)
     _broadcast_session_state(mgr)
     print(f"[{datetime.now()}] Quick start in session {mgr.session.session_code}")
@@ -442,19 +461,39 @@ def on_submit_vote(data):
 
     decision_id = data.get("decision_id")
     choice = data.get("choice")
-    success = mgr.submit_vote(player_id, decision_id, choice)
+    vote_update = None
 
-    if success:
-        party_id = mgr.session.players[player_id].party_id
-        if party_id:
-            party = mgr.session.parties.get(party_id)
-            if party and party.decision_pending:
-                socketio.emit("vote_tally_update", {
+    with mgr.lock:
+        player = mgr.session.players.get(player_id)
+        if not player or not player.party_id:
+            emit("error", {"message": "Not in a party."})
+            return
+        party = mgr.session.parties.get(player.party_id)
+        if not party or not party.decision_pending or party.decision_pending.decision_id != decision_id:
+            emit("error", {"message": "Invalid decision."})
+            return
+        if choice not in party.decision_pending.options:
+            emit("error", {"message": f"Invalid choice '{choice}'. Valid options: {party.decision_pending.options}"})
+            return
+
+        result = mgr.submit_vote(player_id, decision_id, choice)
+        if result:
+            party_id, decision = result
+            if decision and not decision.resolved:
+                vote_update = {
                     "decision_id": decision_id,
-                    "votes": party.decision_pending.votes,
-                }, to=f"party_{party_id}")
-    else:
-        emit("error", {"message": "Vote failed."})
+                    "votes": decision.votes,
+                    "party_id": party_id,
+                }
+        else:
+            emit("error", {"message": "Vote failed."})
+            return
+
+    if vote_update:
+        socketio.emit("vote_tally_update", {
+            "decision_id": vote_update["decision_id"],
+            "votes": vote_update["votes"],
+        }, to=f"party_{vote_update['party_id']}")
 
 
 @socketio.on("captain_override")
@@ -744,6 +783,18 @@ def on_new_session(data=None):
     # Remove old session ID and add the new one
     if old_session_id in sessions:
         del sessions[old_session_id]
+    
+    # Clean up stale sessions
+    for sid in list(sessions.keys()):
+        sm = sessions[sid]
+        with sm.lock:
+            is_stale = sm.session.game_status == "ended" or all(not p.socket_id for p in sm.session.players.values())
+            if is_stale:
+                for pid in list(sm.session.players.keys()):
+                    if player_to_session.get(pid) == sid:
+                        player_to_session.pop(pid, None)
+                sessions.pop(sid, None)
+    
     sessions[mgr.session.session_id] = mgr
 
     # Reconnect host to the new session
@@ -909,18 +960,21 @@ def _auto_advance_worker(session_id: str):
         if not mgr:
             break
 
-        interval = mgr.session.auto_advance_interval
+        with mgr.lock:
+            interval = mgr.session.auto_advance_interval
         socketio.sleep(interval)
 
         mgr = sessions.get(session_id)
         if not mgr:
             break
-        if not mgr.session.auto_advance_enabled:
-            continue
-        if mgr.session.game_status not in ("active",):
-            continue
+        
+        with mgr.lock:
+            if not mgr.session.auto_advance_enabled:
+                continue
+            if mgr.session.game_status not in ("active",):
+                continue
 
-        result = mgr.tick()
+            result = mgr.tick()
         _broadcast_tick_result(mgr, result)
 
 
@@ -948,83 +1002,85 @@ def _stop_auto_advance(mgr: SessionManager):
 # ---------------------------------------------------------------------------
 def _broadcast_session_state(mgr: SessionManager):
     """Broadcast appropriate state views to all connected clients."""
-    # Host gets full state
-    if mgr._host_sid:
-        socketio.emit("session_state", _host_state(mgr), to=mgr._host_sid)
+    with mgr.lock:
+        # Host gets full state
+        if mgr._host_sid:
+            socketio.emit("session_state", _host_state(mgr), to=mgr._host_sid)
 
-    # Players get trimmed state
-    for player in mgr.session.players.values():
-        if player.is_host or not player.socket_id:
-            continue
-        socketio.emit("session_state", mgr.get_player_state(player.player_id), to=player.socket_id)
+        # Players get trimmed state
+        for player in mgr.session.players.values():
+            if player.is_host or not player.socket_id:
+                continue
+            socketio.emit("session_state", mgr.get_player_state(player.player_id), to=player.socket_id)
 
 
 def _broadcast_tick_result(mgr: SessionManager, result: dict):
     """Broadcast a tick result including events."""
-    session_state = result.get("session_state", _host_state(mgr))
-    events = result.get("events", [])
+    with mgr.lock:
+        session_state = result.get("session_state", _host_state(mgr))
+        events = result.get("events", [])
 
-    # Broadcast events globally
-    for ev in events:
-        socketio.emit("event_occurred", ev, to="global")
+        # Broadcast events globally
+        for ev in events:
+            socketio.emit("event_occurred", ev, to="global")
 
-    # Emit decision_required for any party with a new pending decision
-    for party in mgr.session.parties.values():
-        if party.decision_pending and not party.decision_pending.resolved:
-            decision_data = party.decision_pending.to_dict()
-            for pid in party.member_ids:
-                player = mgr.session.players.get(pid)
-                if player and player.socket_id and player.is_alive:
-                    socketio.emit("decision_required", {
-                        "party_id": party.party_id,
-                        "decision": decision_data,
-                    }, to=player.socket_id)
+        # Emit decision_required for any party with a new pending decision
+        for party in mgr.session.parties.values():
+            if party.decision_pending and not party.decision_pending.resolved:
+                decision_data = party.decision_pending.to_dict()
+                for pid in party.member_ids:
+                    player = mgr.session.players.get(pid)
+                    if player and player.socket_id and player.is_alive:
+                        socketio.emit("decision_required", {
+                            "party_id": party.party_id,
+                            "decision": decision_data,
+                        }, to=player.socket_id)
 
-    # Emit party_finished for parties that just finished or died this tick
-    finished_events = [ev for ev in events if ev.get("type") in ("finished", "dead")]
-    for ev in finished_events:
-        party = mgr.session.parties.get(ev.get("party_id"))
-        if not party:
-            continue
-        # Compute rank among finished parties
-        all_finished = [p for p in mgr.session.parties.values() if p.status == "finished"]
-        rank = all_finished.index(party) + 1 if party in all_finished else None
-        alive_members = [pid for pid in party.member_ids if mgr.session.players.get(pid, Player()).is_alive]
-        socketio.emit("party_finished", {
-            "party_id": party.party_id,
-            "party_name": party.party_name,
-            "rank": rank,
-            "survivors": len(alive_members),
-            "score": party.score,
-            "status": party.status,
-        }, to="global")
+        # Emit party_finished for parties that just finished or died this tick
+        finished_events = [ev for ev in events if ev.get("type") in ("finished", "dead")]
+        for ev in finished_events:
+            party = mgr.session.parties.get(ev.get("party_id"))
+            if not party:
+                continue
+            # Compute rank among finished parties
+            all_finished = [p for p in mgr.session.parties.values() if p.status == "finished"]
+            rank = all_finished.index(party) + 1 if party in all_finished else None
+            alive_members = [pid for pid in party.member_ids if mgr.session.players.get(pid, Player()).is_alive]
+            socketio.emit("party_finished", {
+                "party_id": party.party_id,
+                "party_name": party.party_name,
+                "rank": rank,
+                "survivors": len(alive_members),
+                "score": party.score,
+                "status": party.status,
+            }, to="global")
 
-    # Emit game_over if session has ended
-    if mgr.session.game_status == "ended":
-        rankings = sorted(
-            [
-                {
-                    "party_id": p.party_id,
-                    "party_name": p.party_name,
-                    "score": p.score,
-                    "status": p.status,
-                }
-                for p in mgr.session.parties.values()
-            ],
-            key=lambda x: x["score"],
-            reverse=True,
-        )
-        socketio.emit("game_over", {"final_rankings": rankings}, to="global")
+        # Emit game_over if session has ended
+        if mgr.session.game_status == "ended":
+            rankings = sorted(
+                [
+                    {
+                        "party_id": p.party_id,
+                        "party_name": p.party_name,
+                        "score": p.score,
+                        "status": p.status,
+                    }
+                    for p in mgr.session.parties.values()
+                ],
+                key=lambda x: x["score"],
+                reverse=True,
+            )
+            socketio.emit("game_over", {"final_rankings": rankings}, to="global")
 
-    # Send state to host
-    if mgr._host_sid:
-        socketio.emit("session_state", _host_state(mgr), to=mgr._host_sid)
+        # Send state to host
+        if mgr._host_sid:
+            socketio.emit("session_state", _host_state(mgr), to=mgr._host_sid)
 
-    # Send state to each player
-    for player in mgr.session.players.values():
-        if player.is_host or not player.socket_id:
-            continue
-        socketio.emit("session_state", mgr.get_player_state(player.player_id), to=player.socket_id)
+        # Send state to each player
+        for player in mgr.session.players.values():
+            if player.is_host or not player.socket_id:
+                continue
+            socketio.emit("session_state", mgr.get_player_state(player.player_id), to=player.socket_id)
 
 
 @socketio.on("save_state")
@@ -1038,8 +1094,10 @@ def on_save_state(data=None):
     import os
     try:
         os.makedirs("saves", exist_ok=True)
+        with mgr.lock:
+            state = mgr.session.to_dict(player_id=host_id)
         with open("saves/save.json", "w") as f:
-            json.dump(mgr.session.to_dict(player_id=host_id), f, indent=2)
+            json.dump(state, f, indent=2)
         emit("event_occurred", {"message": "Game state saved to disk!"})
     except Exception as e:
         emit("error", {"message": f"Failed to save state: {str(e)}"})

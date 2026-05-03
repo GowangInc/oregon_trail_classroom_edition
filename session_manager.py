@@ -365,29 +365,29 @@ class SessionManager:
     # ------------------------------------------------------------------
     # Player Actions
     # ------------------------------------------------------------------
-    def submit_vote(self, player_id: str, decision_id: str, choice: str) -> bool:
+    def submit_vote(self, player_id: str, decision_id: str, choice: str) -> Optional[Tuple[str, Decision]]:
         with self.lock:
             player = self.session.players.get(player_id)
             if not player or not player.party_id:
-                return False
+                return None
 
             party = self.session.parties.get(player.party_id)
             if not party or not party.decision_pending:
-                return False
+                return None
 
             dec = party.decision_pending
             if dec.decision_id != decision_id:
-                return False
+                return None
             if not player.is_alive:
-                return False
+                return None
             if choice not in dec.options:
-                return False
+                return None
 
             dec.votes[player_id] = choice
 
             # Auto-vote for NPCs in this party
             self._apply_npc_votes(party, dec)
-            return True
+            return (player.party_id, dec)
 
     def _apply_npc_votes(self, party: Party, dec: Decision):
         """Have all NPCs in the party vote with the majority or captain default."""
