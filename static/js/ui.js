@@ -250,6 +250,105 @@ function updateGame(state, myPlayerId) {
     }
 }
 
+function renderRiskPanel(riskData, decisionType) {
+    if (!riskData) return null;
+
+    const panel = document.createElement('div');
+    panel.className = 'risk-panel';
+
+    const header = document.createElement('div');
+    header.className = 'risk-panel-header';
+    header.textContent = '📊 TRAIL RISKS';
+    panel.appendChild(header);
+
+    function addRiskRow(label, pct, color) {
+        const row = document.createElement('div');
+        row.className = 'risk-row';
+
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'risk-label';
+        labelSpan.textContent = label;
+
+        const barContainer = document.createElement('div');
+        barContainer.className = 'risk-bar';
+
+        const barFill = document.createElement('div');
+        barFill.className = 'risk-bar-fill';
+        barFill.style.width = Math.min(100, pct) + '%';
+        if (color) barFill.style.background = color;
+
+        barContainer.appendChild(barFill);
+
+        const pctSpan = document.createElement('span');
+        pctSpan.className = 'risk-pct';
+        pctSpan.textContent = pct + '%';
+
+        row.appendChild(labelSpan);
+        row.appendChild(barContainer);
+        row.appendChild(pctSpan);
+        return row;
+    }
+
+    if (riskData.trail_event_chance_pct !== undefined) {
+        panel.appendChild(addRiskRow('Any trail event', riskData.trail_event_chance_pct));
+    }
+    if (riskData.wagon_breakdown_chance_pct !== undefined) {
+        panel.appendChild(addRiskRow('Wagon damage', riskData.wagon_breakdown_chance_pct, 'var(--term-warn)'));
+    }
+    if (riskData.illness_chance_any_pct !== undefined) {
+        panel.appendChild(addRiskRow('Someone falls ill', riskData.illness_chance_any_pct, 'var(--term-danger)'));
+    }
+
+    if (riskData.health_trend !== undefined) {
+        const trendRow = document.createElement('div');
+        trendRow.className = 'risk-trend';
+        const trend = riskData.health_trend;
+        if (trend > 0) {
+            trendRow.textContent = 'Health trend: improving (+' + trend + '/day)';
+            trendRow.style.color = 'var(--term-green)';
+        } else if (trend < 0) {
+            trendRow.textContent = 'Health trend: declining (' + trend + '/day)';
+            trendRow.style.color = 'var(--term-danger)';
+        } else {
+            trendRow.textContent = 'Health trend: stable';
+            trendRow.style.color = 'var(--term-highlight)';
+        }
+        panel.appendChild(trendRow);
+    }
+
+    if (riskData.river_risks) {
+        const riverHeader = document.createElement('div');
+        riverHeader.className = 'risk-panel-header';
+        riverHeader.style.marginTop = '0.5rem';
+        const depthCat = riskData.river_risks.depth_category || 'unknown';
+        const depthFt = riskData.river_risks.depth_feet || '?';
+        riverHeader.textContent = '🌊 River Crossing (est. ' + depthFt + ' ft, ' + depthCat + ')';
+        panel.appendChild(riverHeader);
+
+        const methods = ['ford', 'caulk', 'ferry', 'wait'];
+        methods.forEach(method => {
+            const info = riskData.river_risks[method];
+            if (!info) return;
+            let label = info.label;
+            if (method === 'ferry' && riskData.river_risks.ferry_cost !== undefined) {
+                label += ' ($' + riskData.river_risks.ferry_cost + ')';
+            }
+            const color = info.mishap_chance_pct > 30 ? 'var(--term-danger)' : (info.mishap_chance_pct > 10 ? 'var(--term-warn)' : 'var(--term-green)');
+            panel.appendChild(addRiskRow(label, info.mishap_chance_pct, color));
+        });
+    }
+
+    if (decisionType === 'hunt' || decisionType === 'rest') {
+        const huntRow = document.createElement('div');
+        huntRow.className = 'risk-trend';
+        const depletion = Math.round((1 - (riskData.hunting_food_per_bullet / 17.5)) * 100);
+        huntRow.textContent = 'Est. hunting yield: ~' + riskData.hunting_food_per_bullet + ' lbs per bullet (depletion: ' + depletion + '%)';
+        panel.appendChild(huntRow);
+    }
+
+    return panel;
+}
+
 function showDecision(decision, myPlayerId, captainId) {
     if (currentDecision && currentDecision.decision_id === decision.decision_id) {
         // Just update timer and votes
@@ -262,6 +361,14 @@ function showDecision(decision, myPlayerId, captainId) {
     els.actionPanel.hidden = true;
     els.decisionPrompt.textContent = decision.prompt || 'DECISION:';
     els.choices.innerHTML = '';
+
+    // Insert risk panel if available
+    if (decision.risk_data) {
+        const riskPanel = renderRiskPanel(decision.risk_data, decision.decision_type);
+        if (riskPanel) {
+            els.choices.appendChild(riskPanel);
+        }
+    }
 
     const isDead = !lastState.players[myPlayerId]?.is_alive;
 

@@ -1,0 +1,251 @@
+/* ==========================================================================
+   ACCESSIBILITY: Okabe-Ito Palette + Font Toggles + High Contrast
+   ========================================================================== */
+
+/* ------------------------------------------------------------------
+   OpenDyslexic font from CDN
+   ------------------------------------------------------------------ */
+@font-face {
+  font-family: 'OpenDyslexic';
+  src: url('https://cdn.jsdelivr.net/gh/antijingoist/opendyslexic@master/web/OpenDyslexic-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'OpenDyslexic';
+  src: url('https://cdn.jsdelivr.net/gh/antijingoist/opendyslexic@master/web/OpenDyslexic-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ------------------------------------------------------------------
+   Okabe-Ito Palette Variables (CVD-safe)
+   ------------------------------------------------------------------ */
+:root {
+  --oi-black: #000000;
+  --oi-orange: #E69F00;
+  --oi-sky-blue: #56B4E9;
+  --oi-bluish-green: #009E73;
+  --oi-yellow: #F0E442;
+  --oi-blue: #0072B2;
+  --oi-vermillion: #D55E00;
+  --oi-reddish-purple: #CC79A7;
+
+  /* Semantic overrides for style.css */
+  --term-green: var(--oi-bluish-green);
+  --term-green-dim: #007a5c;
+  --term-bg: #0a0a0a;
+  --term-bg-surface: #121212;
+  --term-glow: rgba(0, 158, 115, 0.35);
+  --term-border: rgba(0, 158, 115, 0.3);
+  --term-danger: var(--oi-vermillion);
+  --term-warn: var(--oi-orange);
+  --term-info: var(--oi-blue);
+  --term-highlight: #f0f8ff;
+  --term-success: var(--oi-bluish-green);
+
+  /* Health indicators */
+  --health-good: var(--oi-bluish-green);
+  --health-fair: var(--oi-sky-blue);
+  --health-poor: var(--oi-orange);
+  --health-verypoor: var(--oi-vermillion);
+  --health-dead: var(--oi-reddish-purple);
+
+  /* Event types */
+  --event-good: var(--oi-bluish-green);
+  --event-bad: var(--oi-vermillion);
+  --event-neutral: var(--oi-blue);
+  --event-warn: var(--oi-orange);
+
+  /* Font stack */
+  --font-default: 'VT323', monospace;
+  --font-atkinson: 'Atkinson Hyperlegible', sans-serif;
+  --font-opendyslexic: 'OpenDyslexic', sans-serif;
+}
+
+/* ------------------------------------------------------------------
+   Font Families
+   ------------------------------------------------------------------ */
+.font-atkinson {
+  --term-font: var(--font-atkinson);
+  font-family: var(--font-atkinson) !important;
+}
+
+.font-atkinson .ascii-art,
+.font-atkinson .travel-scene,
+.font-atkinson .landmark-ascii,
+.font-atkinson .crt-boot-text,
+.font-atkinson pre,
+.font-atkinson code {
+  font-family: var(--font-atkinson) !important;
+}
+
+.font-opendyslexic {
+  --term-font: var(--font-opendyslexic);
+  font-family: var(--font-opendyslexic) !important;
+}
+
+.font-opendyslexic .ascii-art,
+.font-opendyslexic .travel-scene,
+.font-opendyslexic .landmark-ascii,
+.font-opendyslexic .crt-boot-text,
+.font-opendyslexic pre,
+.font-opendyslexic code {
+  font-family: var(--font-opendyslexic) !important;
+}
+
+/* ------------------------------------------------------------------
+   High Contrast Mode
+   ------------------------------------------------------------------ */
+.high-contrast {
+  --term-bg: #000000;
+  --term-bg-surface: #000000;
+  --term-green: #00ff99;
+  --term-green-dim: #00cc7a;
+  --term-glow: rgba(0, 255, 153, 0.5);
+  --term-border: rgba(255, 255, 255, 0.5);
+  --term-danger: #ff3333;
+  --term-warn: #ffcc00;
+  --term-info: #66ccff;
+  --term-highlight: #ffffff;
+
+  --health-good: #00ff99;
+  --health-fair: #66ccff;
+  --health-poor: #ffcc00;
+  --health-verypoor: #ff3333;
+  --health-dead: #ff66cc;
+
+  --event-good: #00ff99;
+  --event-bad: #ff3333;
+  --event-neutral: #66ccff;
+  --event-warn: #ffcc00;
+}
+
+.high-contrast .screen-content,
+.high-contrast .panel,
+.high-contrast .lobby-panel,
+.high-contrast .viewport {
+  border-width: 2px;
+}
+
+.high-contrast .terminal-btn,
+.high-contrast .choice-btn,
+.high-contrast .terminal-input {
+  border-width: 2px;
+}
+
+.high-contrast .status-msg,
+.high-contrast .travel-terrain-label,
+.high-contrast .ambient-ticker {
+  opacity: 1;
+}
+
+.high-contrast .narrative {
+  opacity: 1;
+}
+
+.high-contrast .highlight {
+  color: #ffffff;
+  text-shadow: none;
+}
+
+.high-contrast .scanlines {
+  display: none;
+}
+
+.high-contrast .flicker-overlay {
+  display: none;
+}
+
+/* ------------------------------------------------------------------
+   Settings Panel
+   ------------------------------------------------------------------ */
+.accessibility-toggle {
+  position: fixed;
+  bottom: 1rem;
+  left: 1rem;
+  z-index: 5000;
+  background: var(--term-bg-surface);
+  border: 1px solid var(--term-border);
+  color: var(--term-green);
+  font-family: var(--term-font);
+  font-size: 1.2rem;
+  padding: 0.5rem 0.8rem;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.accessibility-toggle:hover,
+.accessibility-toggle:focus {
+  background: var(--term-green);
+  color: var(--term-bg);
+  outline: 2px solid var(--term-highlight);
+}
+
+.accessibility-panel {
+  position: fixed;
+  bottom: 3.5rem;
+  left: 1rem;
+  z-index: 5000;
+  background: var(--term-bg);
+  border: 2px solid var(--term-green);
+  padding: 1rem;
+  max-width: 320px;
+  width: 90vw;
+  display: none;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-shadow: 0 0 20px rgba(0,0,0,0.8);
+}
+
+.accessibility-panel.open {
+  display: flex;
+}
+
+.accessibility-panel h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  border-bottom: 1px solid var(--term-border);
+  padding-bottom: 0.3rem;
+}
+
+.accessibility-panel label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.accessibility-panel input[type="radio"],
+.accessibility-panel input[type="checkbox"] {
+  accent-color: var(--term-green);
+  width: 1.2rem;
+  height: 1.2rem;
+  min-width: 1.2rem;
+  min-height: 1.2rem;
+}
+
+.accessibility-panel .setting-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.accessibility-panel .setting-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding-left: 0.5rem;
+}
+
+@media (max-width: 480px) {
+  .accessibility-panel {
+    left: 0.5rem;
+    right: 0.5rem;
+    max-width: none;
+    width: auto;
+  }
+}

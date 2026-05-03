@@ -13,7 +13,6 @@ from game_data import (
     MONTHLY_WEATHER_WEIGHTS,
     DEFAULT_AUTO_ADVANCE_INTERVAL,
     DEFAULT_DECISION_TIMEOUT_AUTO,
-    DEFAULT_DECISION_TIMEOUT_PAUSED,
     TRAIL_EVENTS,
     STORE_PRICES,
     FORT_PRICE_MULTIPLIERS,
@@ -219,6 +218,8 @@ class SessionManager:
             for party in self.session.parties.values():
                 # Set starting date based on selected month
                 start_month = getattr(party, 'start_month', 3)  # Default to March
+                if not (1 <= start_month <= 12):
+                    start_month = 3
                 party.global_date = date(1848, start_month, 1)
                 
                 if party.outfitting_complete:
@@ -287,11 +288,7 @@ class SessionManager:
             # 1. Resolve pending decisions with defaults
             for party in self.session.parties.values():
                 if party.decision_pending and not party.decision_pending.resolved:
-                    timeout = (
-                        DEFAULT_DECISION_TIMEOUT_PAUSED
-                        if self.session.game_status == "paused"
-                        else party.decision_pending.timeout_seconds
-                    )
+                    timeout = party.decision_pending.timeout_seconds
                     # Check if decision has timed out
                     from datetime import datetime
                     elapsed = (datetime.now() - party.decision_pending.created_at).total_seconds()
@@ -613,6 +610,10 @@ class SessionManager:
                 return False
             party.last_vote_called_at = current_time
 
+            terrain = engine._get_terrain_at(party.distance_traveled)
+            players = self._get_party_players(party)
+            risks = engine.calculate_risks(party, players, self.session.global_weather, terrain)
+
             if vote_type == "pace":
                 party.status = "decision"
                 party.decision_pending = Decision(
@@ -629,6 +630,7 @@ class SessionManager:
                     captain_id=party.captain_id,
                     captain_default="Keep pace and rations",
                     timeout_seconds=5,
+                    risk_data=risks,
                 )
             elif vote_type == "hunt":
                 party.status = "decision"
@@ -640,6 +642,7 @@ class SessionManager:
                     captain_id=party.captain_id,
                     captain_default="Continue on",
                     timeout_seconds=5,
+                    risk_data=risks,
                 )
             elif vote_type == "rest":
                 party.status = "decision"
@@ -651,6 +654,7 @@ class SessionManager:
                     captain_id=party.captain_id,
                     captain_default="Continue on",
                     timeout_seconds=5,
+                    risk_data=risks,
                 )
             else:
                 return False
@@ -752,7 +756,8 @@ class SessionManager:
             if self.session.game_status == "active":
                 from game_data import FORT_PRICE_MULTIPLIERS, LANDMARKS
                 # Find current landmark by name if possible, or index
-                current_lm_name = LANDMARKS[party.current_landmark_index].name
+                idx = max(0, min(party.current_landmark_index, len(LANDMARKS) - 1))
+                current_lm_name = LANDMARKS[idx].name
                 price_multiplier = FORT_PRICE_MULTIPLIERS.get(current_lm_name, 1.0)
 
             party, result = engine.buy_item(party, item, quantity, price_multiplier)

@@ -3,9 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#8b4513">
     <title>Oregon Trail: Classroom Edition - Host</title>
     <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/accessibility.css">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/assets/images/icon-192.svg">
 </head>
 <body class="host-theme">
     <div class="crt-overlay">
@@ -152,9 +157,30 @@
         </section>
     </div>
 
+    <!-- Accessibility Settings Panel -->
+    <button id="a11y-toggle-btn" class="accessibility-toggle" aria-label="Open accessibility settings" title="Accessibility Settings">
+        ⚙ A11y
+    </button>
+    <div id="a11y-panel" class="accessibility-panel" role="dialog" aria-label="Accessibility Settings">
+        <h3>Accessibility</h3>
+        <div class="setting-row">
+            <span>Font</span>
+            <div class="setting-options">
+                <label><input type="radio" name="a11y-font" value="default" checked> Default</label>
+                <label><input type="radio" name="a11y-font" value="atkinson"> Atkinson Hyperlegible</label>
+                <label><input type="radio" name="a11y-font" value="opendyslexic"> OpenDyslexic</label>
+            </div>
+        </div>
+        <div class="setting-row">
+            <label><input type="checkbox" id="a11y-high-contrast"> High Contrast</label>
+        </div>
+    </div>
+
     <div id="aria-live" aria-live="polite" aria-atomic="false" class="sr-only"></div>
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script type="module" src="/static/js/host.js"></script>
+    <script src="/static/js/accessibility.js"></script>
+    <script src="/static/js/pwa.js"></script>
 </body>
 </html>

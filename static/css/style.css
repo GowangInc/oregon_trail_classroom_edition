@@ -1,17 +1,30 @@
 @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
 
 :root {
-    --term-green: #4af626;
-    --term-green-dim: #2a9e16;
+    --term-green: #009E73;
+    --term-green-dim: #007a5c;
     --term-bg: #0a0a0a;
     --term-bg-surface: #121212;
-    --term-glow: rgba(74, 246, 38, 0.3);
-    --term-border: rgba(74, 246, 38, 0.3);
-    --term-danger: #ff4444;
-    --term-warn: #ffaa00;
-    --term-info: #44aaff;
+    --term-glow: rgba(0, 158, 115, 0.35);
+    --term-border: rgba(0, 158, 115, 0.3);
+    --term-danger: #D55E00;
+    --term-warn: #E69F00;
+    --term-info: #0072B2;
     --term-font: 'VT323', monospace;
-    --term-highlight: #aaffaa;
+    --term-highlight: #f0f8ff;
+
+    /* Health indicators */
+    --health-good: #009E73;
+    --health-fair: #56B4E9;
+    --health-poor: #E69F00;
+    --health-verypoor: #D55E00;
+    --health-dead: #CC79A7;
+
+    /* Event types */
+    --event-good: #009E73;
+    --event-bad: #D55E00;
+    --event-neutral: #0072B2;
+    --event-warn: #E69F00;
 }
 
 * {
@@ -193,20 +206,20 @@ html, body {
 }
 
 .flash-overlay.flash-death {
-    background: rgba(255, 0, 0, 0.35);
-    box-shadow: inset 0 0 100px rgba(255, 0, 0, 0.5);
+    background: rgba(213, 94, 0, 0.35);
+    box-shadow: inset 0 0 100px rgba(213, 94, 0, 0.5);
 }
 
 .flash-overlay.flash-event {
-    background: rgba(255, 170, 0, 0.25);
+    background: rgba(230, 159, 0, 0.25);
 }
 
 .flash-overlay.flash-landmark {
-    background: rgba(68, 170, 255, 0.2);
+    background: rgba(0, 114, 178, 0.2);
 }
 
 .flash-overlay.flash-danger {
-    background: rgba(255, 0, 0, 0.2);
+    background: rgba(213, 94, 0, 0.2);
     animation: pulse-danger 0.5s ease-in-out 3;
 }
 
@@ -255,7 +268,7 @@ html, body {
 .weather-heat .weather-particle {
     width: 100%;
     height: 3px;
-    background: linear-gradient(to right, transparent, rgba(255, 100, 0, 0.15), transparent);
+    background: linear-gradient(to right, transparent, rgba(213, 94, 0, 0.15), transparent);
     animation: heat-shimmer linear infinite;
 }
 
@@ -269,7 +282,7 @@ html, body {
     content: '';
     position: absolute;
     inset: 0;
-    background: linear-gradient(to bottom, rgba(255, 80, 0, 0.05), transparent 40%);
+    background: linear-gradient(to bottom, rgba(213, 94, 0, 0.05), transparent 40%);
     animation: heat-haze 3s ease-in-out infinite;
 }
 
@@ -317,7 +330,7 @@ html, body {
 
 .landmark-name {
     font-size: 2.5rem;
-    color: #f0fff8;
+    color: #f0f8ff;
     text-shadow: 0 0 20px var(--term-green), 0 0 40px var(--term-glow);
     margin: 0 0 0.5rem 0;
     text-transform: uppercase;
@@ -328,7 +341,7 @@ html, body {
     font-size: 1.2rem;
     opacity: 0.85;
     color: var(--term-info);
-    text-shadow: 0 0 5px rgba(68, 170, 255, 0.3);
+    text-shadow: 0 0 5px rgba(0, 114, 178, 0.3);
     margin: 0;
 }
 
@@ -429,7 +442,7 @@ h1, h2, h3 {
 
 .terminal-input:focus {
     box-shadow: 0 0 10px var(--term-glow);
-    background: rgba(74, 246, 38, 0.05);
+    background: rgba(0, 158, 115, 0.05);
 }
 
 .terminal-btn {
@@ -532,11 +545,11 @@ h1, h2, h3 {
 }
 
 /* Status Bar Color Coding */
-.stat-health-good { color: var(--term-green); text-shadow: 0 0 5px var(--term-glow); }
-.stat-health-fair { color: #ccff66; text-shadow: 0 0 5px rgba(204, 255, 102, 0.3); }
-.stat-health-poor { color: var(--term-warn); text-shadow: 0 0 5px rgba(255, 170, 0, 0.3); }
-.stat-health-verypoor { color: #ff6644; text-shadow: 0 0 8px rgba(255, 100, 0, 0.4); }
-.stat-health-dead { color: var(--term-danger); text-shadow: 0 0 8px rgba(255, 0, 0, 0.5); }
+.stat-health-good { color: var(--health-good); text-shadow: 0 0 5px var(--term-glow); }
+.stat-health-fair { color: var(--health-fair); text-shadow: 0 0 5px rgba(86, 180, 233, 0.3); }
+.stat-health-poor { color: var(--health-poor); text-shadow: 0 0 5px rgba(230, 159, 0, 0.3); }
+.stat-health-verypoor { color: var(--health-verypoor); text-shadow: 0 0 8px rgba(213, 94, 0, 0.4); }
+.stat-health-dead { color: var(--health-dead); text-shadow: 0 0 8px rgba(204, 121, 167, 0.5); }
 
 .stat-food-critical {
     color: var(--term-danger);
@@ -548,10 +561,10 @@ h1, h2, h3 {
     50% { opacity: 0.5; text-shadow: 0 0 15px rgba(255, 0, 0, 0.8); }
 }
 
-.stat-weather-rain { color: #88ccff; }
-.stat-weather-snow { color: #eeeeff; }
-.stat-weather-hot { color: #ffaa44; }
-.stat-weather-cold { color: #aaddff; }
+.stat-weather-rain { color: #56B4E9; }
+.stat-weather-snow { color: #F0E442; }
+.stat-weather-hot { color: #D55E00; }
+.stat-weather-cold { color: #56B4E9; }
 
 .game-body {
     display: flex;
@@ -695,19 +708,19 @@ h1, h2, h3 {
 }
 
 .narrative.event {
-    color: #f0fff8;
-    text-shadow: 0 0 8px var(--term-green);
+    color: #F0E442;
+    text-shadow: 0 0 8px rgba(240, 228, 66, 0.3);
     opacity: 1;
 }
 
 .narrative.death {
-    color: var(--term-danger);
-    text-shadow: 0 0 8px rgba(255, 68, 68, 0.5);
+    color: var(--event-bad);
+    text-shadow: 0 0 8px rgba(213, 94, 0, 0.5);
 }
 
 .narrative.landmark {
-    color: var(--term-info);
-    text-shadow: 0 0 8px rgba(68, 170, 255, 0.4);
+    color: var(--event-neutral);
+    text-shadow: 0 0 8px rgba(0, 114, 178, 0.4);
 }
 
 /* Typewriter effect for decision prompt */
@@ -803,6 +816,61 @@ h1, h2, h3 {
     flex-wrap: wrap;
 }
 
+/* Risk Panel */
+.risk-panel {
+    border: 1px solid var(--term-border);
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+    background: rgba(0, 20, 0, 0.3);
+    width: 100%;
+    max-width: 600px;
+}
+
+.risk-panel-header {
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+    color: var(--term-highlight);
+}
+
+.risk-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.risk-label {
+    min-width: 160px;
+    font-size: 0.85rem;
+}
+
+.risk-bar {
+    flex: 1;
+    height: 8px;
+    background: #111;
+    border: 1px solid #333;
+    overflow: hidden;
+}
+
+.risk-bar-fill {
+    height: 100%;
+    background: var(--term-green);
+    transition: width 0.3s ease;
+}
+
+.risk-pct {
+    min-width: 40px;
+    font-size: 0.85rem;
+    text-align: right;
+}
+
+.risk-trend {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    opacity: 0.9;
+}
+
 .choice-btn {
     background: transparent;
     border: 1px solid var(--term-green);
@@ -852,7 +920,7 @@ h1, h2, h3 {
 
 .vote-tally-item.leading {
     border-color: var(--term-green);
-    background: rgba(74, 246, 38, 0.15);
+    background: rgba(0, 158, 115, 0.15);
     box-shadow: 0 0 5px var(--term-glow);
 }
 
@@ -1154,24 +1222,37 @@ h1, h2, h3 {
 
 /* Host-specific overrides (also used by host.html) */
 .host-theme {
-    --term-green: #66ccff;
-    --term-green-dim: #3399cc;
-    --term-glow: rgba(102, 204, 255, 0.3);
-    --term-border: rgba(102, 204, 255, 0.3);
+    --term-green: #56B4E9;
+    --term-green-dim: #0072B2;
+    --term-glow: rgba(86, 180, 233, 0.35);
+    --term-border: rgba(86, 180, 233, 0.3);
     --term-bg: #0d1117;
     --term-bg-surface: #161b22;
+    --term-danger: #D55E00;
+    --term-warn: #E69F00;
+    --term-info: #0072B2;
+    --term-highlight: #f0f8ff;
+    --health-good: #009E73;
+    --health-fair: #56B4E9;
+    --health-poor: #E69F00;
+    --health-verypoor: #D55E00;
+    --health-dead: #CC79A7;
+    --event-good: #009E73;
+    --event-bad: #D55E00;
+    --event-neutral: #0072B2;
+    --event-warn: #E69F00;
 }
 
 .host-theme .highlight {
     color: #e6f7ff;
-    text-shadow: 0 0 5px #66ccff;
+    text-shadow: 0 0 5px #56B4E9;
 }
 
 /* Progress bar for leaderboard */
 .progress-bar {
     width: 100%;
     height: 8px;
-    background: rgba(74, 246, 38, 0.1);
+    background: rgba(0, 158, 115, 0.1);
     border: 1px solid var(--term-border);
     margin-top: 0.25rem;
     position: relative;

@@ -628,8 +628,8 @@ def filter_swear(text: str, replacement: str = "[censored]") -> str:
     """Replace swear words in text with a replacement string."""
     import re
     result = text
-    lower = text.lower()
-    normalized = lower.replace("0", "o").replace("1", "i").replace("3", "e").replace("4", "a").replace("5", "s").replace("7", "t").replace("$", "s")
+    # Normalize leet-speak so replacements catch obfuscated words
+    result = result.lower().replace("0", "o").replace("1", "i").replace("3", "e").replace("4", "a").replace("5", "s").replace("7", "t").replace("$", "s")
     for word in SWEAR_WORDS:
         pattern = re.compile(r'\b' + re.escape(word) + r'\b', re.IGNORECASE)
         result = pattern.sub(replacement, result)

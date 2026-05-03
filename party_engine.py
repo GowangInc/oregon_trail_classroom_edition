@@ -94,6 +94,121 @@ class PartyEngine:
                 return item
         return choices[-1][0]
 
+    @staticmethod
+    def calculate_risks(
+        party: Party,
+        players: Dict[str, Player],
+        global_weather: Weather,
+        terrain: Terrain,
+        river_depth: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Return a dict of current risk percentages for display to the player."""
+        alive_members = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
+
+        # Trail events (any event today)
+        any_event_prob = 0.0
+        wagon_breakdown_prob = 0.0
+        for event in TRAIL_EVENTS:
+            prob = event.base_probability
+            prob *= event.terrain_multipliers.get(terrain, 1.0)
+            prob *= event.weather_multipliers.get(global_weather, 1.0)
+            any_event_prob = 1 - (1 - any_event_prob) * (1 - prob)
+            if event.id in ("broken_wheel", "broken_axle", "broken_tongue"):
+                wagon_breakdown_prob = 1 - (1 - wagon_breakdown_prob) * (1 - prob)
+
+        # Illness probability
+        if alive_members:
+            avg_health_mult = sum(
+                ILLNESS_HEALTH_MULTIPLIERS.get(players[pid].health_status, 1.0)
+                for pid in alive_members
+            ) / len(alive_members)
+        else:
+            avg_health_mult = 1.0
+
+        illness_prob_per_person = ILLNESS_BASE_PROBABILITY * avg_health_mult * ILLNESS_WEATHER_MULTIPLIERS.get(global_weather, 1.0)
+        illness_prob_any = 1 - (1 - illness_prob_per_person) ** max(1, len(alive_members))
+
+        # Hunting yield estimate
+        depletion = 1.0 - party.hunting_region_depletion
+        est_food_per_bullet = int(17.5 * depletion)
+
+        # Health trend
+        pace_impact = PACE_HEALTH_IMPACT[party.pace]
+        rations_impact = RATIONS_HEALTH_IMPACT[party.rations]
+        weather_impact = WEATHER_HEALTH_IMPACT[global_weather]
+
+        clothing_penalty = 0
+        if global_weather in (Weather.COLD, Weather.VERY_COLD, Weather.SNOW):
+            clothing_needed = len(alive_members)
+            if party.inventory.clothing < clothing_needed:
+                clothing_penalty = -1
+                if global_weather in (Weather.VERY_COLD, Weather.SNOW):
+                    clothing_penalty = -2
+
+        food_penalty = 0
+        if party.inventory.food <= 0:
+            starvation_days = getattr(party, '_starvation_days', 0)
+            if starvation_days >= 10:
+                food_penalty = -4
+            elif starvation_days >= 5:
+                food_penalty = -3
+            else:
+                food_penalty = -2
+
+        health_trend = pace_impact + rations_impact + weather_impact + clothing_penalty + food_penalty
+
+        # River crossing risks
+        river_risks = None
+        if river_depth is not None:
+            depth_cat = "shallow"
+            if river_depth >= 11:
+                depth_cat = "very_deep"
+            elif river_depth >= 7:
+                depth_cat = "deep"
+            elif river_depth >= 4:
+                depth_cat = "moderate"
+
+            river_risks = {}
+            for method_key, label in [
+                ("ford", "Ford the river"),
+                ("caulk", "Caulk the wagon"),
+                ("ferry", "Take a ferry"),
+                ("wait", "Wait for better conditions"),
+            ]:
+                chance = RIVER_MISHAP_CHANCES.get(depth_cat, {}).get(method_key, 0.0)
+                river_risks[method_key] = {
+                    "mishap_chance_pct": round(chance * 100),
+                    "label": label,
+                }
+            ferry_cost = (len(alive_members) * FERRY_COST_PER_PERSON) + (party.inventory.oxen * FERRY_COST_PER_OXEN)
+            river_risks["ferry_cost"] = ferry_cost
+            river_risks["depth_feet"] = river_depth
+            river_risks["depth_category"] = depth_cat
+
+        return {
+            "trail_event_chance_pct": round(min(any_event_prob, 1.0) * 100),
+            "wagon_breakdown_chance_pct": round(min(wagon_breakdown_prob, 1.0) * 100),
+            "illness_chance_per_person_pct": round(min(illness_prob_per_person, 1.0) * 100),
+            "illness_chance_any_pct": round(min(illness_prob_any, 1.0) * 100),
+            "hunting_food_per_bullet": est_food_per_bullet,
+            "health_trend": health_trend,
+            "terrain": terrain.value,
+            "weather": global_weather.value,
+            "river_risks": river_risks,
+        }
+
+    @staticmethod
+    def _estimate_river_depth(weather: Weather) -> int:
+        """Estimate typical river depth in feet based on weather (for risk display)."""
+        base = 2
+        if weather == Weather.RAIN:
+            base += 4
+        elif weather == Weather.SNOW:
+            base += 2
+        elif weather in (Weather.VERY_HOT, Weather.HOT):
+            base = max(1, base - 1)
+        return base + 1
+
     # ------------------------------------------------------------------
     # Public: daily tick
     # ------------------------------------------------------------------
@@ -139,6 +254,7 @@ class PartyEngine:
             party.decision_pending = None
 
         terrain = self._get_terrain_at(party.distance_traveled)
+        base_risks = self.calculate_risks(party, players, global_weather, terrain)
         miles_today = 0
 
         if not decision_pending:
@@ -202,6 +318,7 @@ class PartyEngine:
                             captain_id=party.captain_id,
                             captain_default="Keep pace and rations",
                             timeout_seconds=5,
+                            risk_data=base_risks,
                         )
                     else:
                         # Regular travel decision: hunt, rest, or continue
@@ -213,6 +330,7 @@ class PartyEngine:
                             captain_id=party.captain_id,
                             captain_default="Continue on",
                             timeout_seconds=5,
+                            risk_data=base_risks,
                         )
 
             # 9. Check landmark arrival
@@ -238,75 +356,84 @@ class PartyEngine:
                         "message": f"{party.party_name} has reached Oregon!",
                     })
 
-                # --- BRANCH POINT: South Pass ---
-                elif next_lm.name == "South Pass":
-                    party.status = "decision"
-                    party.travel_days_since_decision = 0
-                    party.decision_pending = Decision(
-                        party_id=party.party_id,
-                        decision_type=DecisionType.TAKE_SHORTCUT,
-                        prompt="You have reached the Continental Divide at South Pass. Which route will you take?",
-                        options=["Head to Fort Bridger (safer, fort ahead)", "Take the Green River shortcut (shorter, riskier)"],
-                        captain_id=party.captain_id,
-                        captain_default="Head to Fort Bridger (safer, fort ahead)",
-                        timeout_seconds=10,
-                    )
+                # Only create a landmark decision if none is already pending
+                elif party.decision_pending is None:
+                    # --- BRANCH POINT: South Pass ---
+                    if next_lm.name == "South Pass":
+                        party.status = "decision"
+                        party.travel_days_since_decision = 0
+                        party.decision_pending = Decision(
+                            party_id=party.party_id,
+                            decision_type=DecisionType.TAKE_SHORTCUT,
+                            prompt="You have reached the Continental Divide at South Pass. Which route will you take?",
+                            options=["Head to Fort Bridger (safer, fort ahead)", "Take the Green River shortcut (shorter, riskier)"],
+                            captain_id=party.captain_id,
+                            captain_default="Head to Fort Bridger (safer, fort ahead)",
+                            timeout_seconds=10,
+                            risk_data=base_risks,
+                        )
 
-                # --- BRANCH POINT: The Dalles ---
-                elif next_lm.name == "The Dalles":
-                    party.status = "decision"
-                    party.travel_days_since_decision = 0
-                    toll_cost = BARLOW_TOLL_ROAD_COST
-                    party.decision_pending = Decision(
-                        party_id=party.party_id,
-                        decision_type=DecisionType.TAKE_SHORTCUT,
-                        prompt=f"The Dalles — the end of the overland trail. You must find a way to the Willamette Valley. The Barlow Toll Road costs ${toll_cost}.",
-                        options=[f"Take the Barlow Toll Road (${toll_cost}, safer)", "Float down the Columbia River (free, dangerous)"],
-                        captain_id=party.captain_id,
-                        captain_default=f"Take the Barlow Toll Road (${toll_cost}, safer)",
-                        timeout_seconds=10,
-                    )
+                    # --- BRANCH POINT: The Dalles ---
+                    elif next_lm.name == "The Dalles":
+                        party.status = "decision"
+                        party.travel_days_since_decision = 0
+                        toll_cost = BARLOW_TOLL_ROAD_COST
+                        party.decision_pending = Decision(
+                            party_id=party.party_id,
+                            decision_type=DecisionType.TAKE_SHORTCUT,
+                            prompt=f"The Dalles — the end of the overland trail. You must find a way to the Willamette Valley. The Barlow Toll Road costs ${toll_cost}.",
+                            options=[f"Take the Barlow Toll Road (${toll_cost}, safer)", "Float down the Columbia River (free, dangerous)"],
+                            captain_id=party.captain_id,
+                            captain_default=f"Take the Barlow Toll Road (${toll_cost}, safer)",
+                            timeout_seconds=10,
+                            risk_data=base_risks,
+                        )
 
-                elif next_lm.is_river:
-                    party.status = "river_crossing"
-                    party.travel_days_since_decision = 0
-                    # Snake River gets an Indian guide option
-                    options = ["Ford the river", "Caulk the wagon", "Take a ferry", "Wait for better conditions"]
-                    if next_lm.name == "Snake River Crossing":
-                        options.insert(2, "Hire an Indian guide ($5)")
-                    party.decision_pending = Decision(
-                        party_id=party.party_id,
-                        decision_type=DecisionType.RIVER_METHOD,
-                        prompt=f"You must cross the {next_lm.name}. {next_lm.description} How will you proceed?",
-                        options=options,
-                        captain_id=party.captain_id,
-                        captain_default="Ford the river",
-                        timeout_seconds=5,
-                    )
-                elif next_lm.is_fort:
-                    party.status = "decision"
-                    party.travel_days_since_decision = 0
-                    party.decision_pending = Decision(
-                        party_id=party.party_id,
-                        decision_type=DecisionType.BUY_SUPPLIES,
-                        prompt=f"You have reached {next_lm.name}. {next_lm.description} Would you like to buy supplies?",
-                        options=["Buy supplies", "Continue on"],
-                        captain_id=party.captain_id,
-                        captain_default="Continue on",
-                        timeout_seconds=5,
-                    )
-                else:
-                    party.status = "decision"
-                    party.travel_days_since_decision = 0
-                    party.decision_pending = Decision(
-                        party_id=party.party_id,
-                        decision_type=DecisionType.REST,
-                        prompt=f"You have reached {next_lm.name}. {next_lm.description} What would you like to do?",
-                        options=["Rest here", "Hunt for food", "Continue on"],
-                        captain_id=party.captain_id,
-                        captain_default="Continue on",
-                        timeout_seconds=5,
-                    )
+                    elif next_lm.is_river:
+                        party.status = "river_crossing"
+                        party.travel_days_since_decision = 0
+                        # Snake River gets an Indian guide option
+                        options = ["Ford the river", "Caulk the wagon", "Take a ferry", "Wait for better conditions"]
+                        if next_lm.name == "Snake River Crossing":
+                            options.insert(2, "Hire an Indian guide ($5)")
+                        estimated_depth = self._estimate_river_depth(global_weather)
+                        river_risks = self.calculate_risks(party, players, global_weather, terrain, river_depth=estimated_depth)
+                        party.decision_pending = Decision(
+                            party_id=party.party_id,
+                            decision_type=DecisionType.RIVER_METHOD,
+                            prompt=f"You must cross the {next_lm.name}. {next_lm.description} How will you proceed?",
+                            options=options,
+                            captain_id=party.captain_id,
+                            captain_default="Ford the river",
+                            timeout_seconds=5,
+                            risk_data=river_risks,
+                        )
+                    elif next_lm.is_fort:
+                        party.status = "decision"
+                        party.travel_days_since_decision = 0
+                        party.decision_pending = Decision(
+                            party_id=party.party_id,
+                            decision_type=DecisionType.BUY_SUPPLIES,
+                            prompt=f"You have reached {next_lm.name}. {next_lm.description} Would you like to buy supplies?",
+                            options=["Buy supplies", "Continue on"],
+                            captain_id=party.captain_id,
+                            captain_default="Continue on",
+                            timeout_seconds=5,
+                            risk_data=base_risks,
+                        )
+                    else:
+                        party.status = "decision"
+                        party.travel_days_since_decision = 0
+                        party.decision_pending = Decision(
+                            party_id=party.party_id,
+                            decision_type=DecisionType.REST,
+                            prompt=f"You have reached {next_lm.name}. {next_lm.description} What would you like to do?",
+                            options=["Rest here", "Hunt for food", "Continue on"],
+                            captain_id=party.captain_id,
+                            captain_default="Continue on",
+                            timeout_seconds=5,
+                            risk_data=base_risks,
+                        )
 
         # Check if all dead
         alive_members = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]

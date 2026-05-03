@@ -129,6 +129,7 @@ class Decision:
     timeout_seconds: int = 10
     resolved: bool = False
     result: Optional[str] = None
+    risk_data: Optional[Dict[str, Any]] = None
 
     def tally_votes(self) -> Dict[str, int]:
         """Return vote counts per option."""
@@ -166,6 +167,7 @@ class Decision:
             "timeout_seconds": self.timeout_seconds,
             "resolved": self.resolved,
             "result": self.result,
+            "risk_data": self.risk_data,
         }
 
 
@@ -309,6 +311,7 @@ class Party:
                 timeout_seconds=d.get("timeout_seconds", 10),
                 resolved=d.get("resolved", False),
                 result=d.get("result"),
+                risk_data=d.get("risk_data"),
             )
         return party
 

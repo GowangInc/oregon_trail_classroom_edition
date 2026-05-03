@@ -3,9 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#8b4513">
     <title>Oregon Trail Map</title>
     <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/accessibility.css">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/assets/images/icon-192.svg">
     <style>
         body { margin: 0; overflow: hidden; background: #0a0a0a; color: #4af626; font-family: 'VT323', monospace; }
         #map-container {
@@ -14,7 +19,7 @@
             height: 100vh;
             background-color: #121212;
             overflow: hidden;
-            border: 2px solid #4af626;
+            border: 2px solid #009E73;
             box-sizing: border-box;
         }
         
@@ -24,7 +29,7 @@
             left: 5%;
             width: 90%;
             height: 4px;
-            background: repeating-linear-gradient(90deg, #4af626, #4af626 10px, transparent 10px, transparent 20px);
+            background: repeating-linear-gradient(90deg, #009E73, #009E73 10px, transparent 10px, transparent 20px);
             opacity: 0.3;
         }
 
@@ -34,9 +39,9 @@
             transform: translate(-50%, -50%);
             width: 12px;
             height: 12px;
-            background-color: #4af626;
+            background-color: #009E73;
             border-radius: 50%;
-            box-shadow: 0 0 10px #4af626;
+            box-shadow: 0 0 10px #009E73;
         }
 
         .landmark-label {
@@ -44,9 +49,9 @@
             top: calc(50% + 15px);
             transform: translateX(-50%);
             font-size: 1.2rem;
-            color: #4af626;
+            color: #009E73;
             white-space: nowrap;
-            text-shadow: 0 0 5px #4af626;
+            text-shadow: 0 0 5px #009E73;
         }
 
         .party-marker {
@@ -82,7 +87,7 @@
             text-align: right;
             background: rgba(0,0,0,0.8);
             padding: 1rem;
-            border: 1px solid #4af626;
+            border: 1px solid #009E73;
         }
     </style>
 </head>
@@ -145,7 +150,7 @@
             socket.emit('join_spectator');
         });
 
-        const colors = ['#ff4444', '#ffeb3b', '#44aaff', '#ffaa00', '#ff00ff', '#00ffff'];
+        const colors = ['#D55E00', '#E69F00', '#0072B2', '#56B4E9', '#CC79A7', '#009E73', '#F0E442'];
 
         socket.on('session_state', (state) => {
             if (!state) return;
@@ -190,5 +195,6 @@
             console.log("Disconnected from server.");
         });
     </script>
+    <script src="/static/js/accessibility.js"></script>
 </body>
 </html>

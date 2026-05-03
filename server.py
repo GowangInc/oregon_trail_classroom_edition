@@ -94,8 +94,10 @@ def debug_state():
 @socketio.on("connect")
 def on_connect(auth):
     """Handle client connection."""
-    player_id = auth.get("player_id") if auth else None
-    is_host_request = auth.get("is_host") if auth else False
+    if not isinstance(auth, dict):
+        auth = {}
+    player_id = auth.get("player_id")
+    is_host_request = auth.get("is_host", False)
 
     # Host connection: create or reconnect to session
     if is_host_request:
@@ -243,6 +245,9 @@ def on_join_spectator(data=None):
 
 @socketio.on("join_session")
 def on_join_session(data):
+    if not isinstance(data, dict):
+        emit("error", {"message": "Invalid join data"})
+        return
     name = data.get("name", "Unknown")
     name = name.strip()
     name = name[:30]
@@ -1186,7 +1191,10 @@ def _broadcast_tick_result(mgr: SessionManager, result: dict):
             if not party:
                 continue
             # Compute rank among finished parties
-            all_finished = [p for p in mgr.session.parties.values() if p.status == "finished"]
+            all_finished = sorted(
+                [p for p in mgr.session.parties.values() if p.status == "finished"],
+                key=lambda p: (-p.distance_traveled, p.party_id),
+            )
             rank = all_finished.index(party) + 1 if party in all_finished else None
             alive_members = []
             for pid in party.member_ids:

@@ -115,8 +115,13 @@ def _resolve_pending_decisions(host, mgr, party_members, active_clients):
             if pid in mgr.session.players and mgr.session.players[pid].is_alive:
                 client.emit("submit_vote", {"decision_id": dec.decision_id, "choice": choice})
 
-        # Verify votes were recorded
-        assert len(dec.votes) > 0
+        # Verify votes were recorded if any members are alive
+        alive_members = [
+            pid for _, pid in members
+            if pid in mgr.session.players and mgr.session.players[pid].is_alive
+        ]
+        if alive_members:
+            assert len(dec.votes) > 0, "Expected at least one vote from alive members"
 
         # Host override to resolve immediately
         host.emit("host_override_decision", {"party_id": party_id, "choice": choice})
@@ -383,7 +388,11 @@ def test_complete_game_flow():
     assert injected["args"][0]["party_id"] == party_a_id
 
     _drain(*active_clients)
-    assert mgr.session.parties[party_a_id].inventory.wagon_wheels < wheels_before
+    # If there was a spare wheel it is consumed; otherwise a decision is created.
+    if wheels_before > 0:
+        assert mgr.session.parties[party_a_id].inventory.wagon_wheels < wheels_before
+    else:
+        assert mgr.session.parties[party_a_id].decision_pending is not None
 
     # ========================================================================
     # 12. Auto-advance: enable, verify ticks, verify no duplicate threads
