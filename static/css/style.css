@@ -237,13 +237,6 @@ html, body {
     animation: rain-fall linear infinite;
 }
 
-@keyframes rain-fall {
-    0% { transform: translateY(-20px); opacity: 0; }
-    10% { opacity: 0.6; }
-    90% { opacity: 0.6; }
-    100% { transform: translateY(100vh); opacity: 0; }
-}
-
 .weather-snow .weather-particle {
     width: 4px;
     height: 4px;
@@ -278,11 +271,6 @@ html, body {
     inset: 0;
     background: linear-gradient(to bottom, rgba(255, 80, 0, 0.05), transparent 40%);
     animation: heat-haze 3s ease-in-out infinite;
-}
-
-@keyframes heat-haze {
-    0%, 100% { opacity: 0.3; }
-    50% { opacity: 0.7; }
 }
 
 /* Landmark Overlay */
@@ -668,11 +656,6 @@ h1, h2, h3 {
     animation: rain-fall 0.5s linear infinite;
 }
 
-@keyframes rain-fall {
-    from { transform: translateY(0); }
-    to { transform: translateY(50%); }
-}
-
 .weather-snow::after {
     content: "* * *\n * * *\n* * *";
     position: absolute;
@@ -686,17 +669,7 @@ h1, h2, h3 {
     animation: snow-drift 3s linear infinite;
 }
 
-@keyframes snow-drift {
-    0% { transform: translate(0, 0); }
-    50% { transform: translate(20px, 50%); }
-    100% { transform: translate(0, 100%); }
-}
-
 .weather-hot { background: rgba(255, 170, 0, 0.1); animation: heat-haze 2s ease-in-out infinite; }
-@keyframes heat-haze {
-    0%, 100% { opacity: 0.05; }
-    50% { opacity: 0.15; }
-}
 
 /* Ambient Ticker */
 .ambient-ticker {
@@ -822,11 +795,6 @@ h1, h2, h3 {
     background: var(--term-danger);
     box-shadow: 0 0 8px rgba(255, 0, 0, 0.6);
     animation: pulse-timer 0.5s ease-in-out infinite;
-}
-
-@keyframes pulse-timer {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
 }
 
 .choices {
