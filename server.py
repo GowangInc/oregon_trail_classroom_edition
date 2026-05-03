@@ -1,6 +1,7 @@
 """Flask-SocketIO server for The Oregon Trail multiplayer game."""
 
 import os
+import re
 import socket
 import sys
 from datetime import datetime
@@ -251,6 +252,7 @@ def on_join_session(data):
     name = data.get("name", "Unknown")
     name = name.strip()
     name = name[:30]
+    name = re.sub(r'<[^>]+>', '', name)
     if not name:
         emit("error", {"message": "Name cannot be empty."})
         return
@@ -300,6 +302,7 @@ def on_create_party(data):
         return
 
     party_name = data.get("party_name", "New Party")
+    party_name = re.sub(r'<[^>]+>', '', party_name)[:40]
     party = mgr.create_party(party_name)
     emit("party_created", party.to_dict(include_private=True))
     _broadcast_session_state(mgr)
@@ -380,6 +383,7 @@ def on_set_party_name(data):
 
     party_id = data.get("party_id")
     name = data.get("name", "")
+    name = re.sub(r'<[^>]+>', '', name)[:40]
     if contains_swear(name):
         name = filter_swear(name, "???")
     mgr.set_party_name(party_id, name)
@@ -1040,6 +1044,7 @@ def on_submit_epitaph(data):
     party_id = data.get("party_id")
     tombstone_index = data.get("tombstone_index", -1)
     epitaph = data.get("epitaph", "")
+    epitaph = re.sub(r'<[^>]+>', '', epitaph)[:200]
     if contains_swear(epitaph):
         epitaph = filter_swear(epitaph, "[redacted]")
     with mgr.lock:
@@ -1066,6 +1071,7 @@ def on_host_edit_tombstone(data):
 
     tombstone_index = data.get("tombstone_index", -1)
     epitaph = data.get("epitaph", "")
+    epitaph = re.sub(r'<[^>]+>', '', epitaph)[:200]
     if contains_swear(epitaph):
         epitaph = filter_swear(epitaph, "[redacted]")
     success = mgr.host_edit_tombstone(tombstone_index, epitaph)
