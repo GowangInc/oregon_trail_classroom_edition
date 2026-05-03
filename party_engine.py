@@ -20,6 +20,7 @@ from game_data import (
     RATIONS_FOOD_PER_PERSON_PER_DAY,
     RATIONS_HEALTH_IMPACT,
     RIVER_MISHAP_CHANCES,
+    RIVER_OUTCOME_PROPORTIONS,
     TERRAIN_SEGMENTS,
     TOTAL_DISTANCE,
     TRAIL_EVENTS,
@@ -93,6 +94,31 @@ class PartyEngine:
             if r <= 0:
                 return item
         return choices[-1][0]
+
+    @staticmethod
+    def _compute_river_outcome_thresholds(mishap_chance: float) -> Dict[str, Tuple[float, float]]:
+        """Compute roll thresholds for each river crossing outcome tier.
+
+        The good zone [0, 1-mishap_chance) maps to Perfect / Successful.
+        The bad zone [1-mishap_chance, 1] maps to Difficult / Near Disaster / Disaster.
+        """
+        good_zone = 1.0 - mishap_chance
+        props = RIVER_OUTCOME_PROPORTIONS
+        return {
+            "perfect": (0.0, good_zone * props["perfect"]),
+            "successful": (good_zone * props["perfect"], good_zone),
+            "difficult": (good_zone, good_zone + mishap_chance * props["difficult"]),
+            "near_disaster": (good_zone + mishap_chance * props["difficult"], good_zone + mishap_chance * (props["difficult"] + props["near_disaster"])),
+            "disaster": (good_zone + mishap_chance * (props["difficult"] + props["near_disaster"]), 1.0),
+        }
+
+    def _get_river_outcome(self, roll: float, thresholds: Dict[str, Tuple[float, float]]) -> str:
+        """Map a 0-1 roll to an outcome tier using the given thresholds."""
+        for outcome, (low, high) in thresholds.items():
+            if low <= roll < high:
+                return outcome
+        # Floating-point edge case at exactly 1.0
+        return "disaster"
 
     @staticmethod
     def calculate_risks(
@@ -176,9 +202,14 @@ class PartyEngine:
                 ("wait", "Wait for better conditions"),
             ]:
                 chance = RIVER_MISHAP_CHANCES.get(depth_cat, {}).get(method_key, 0.0)
+                thresholds = PartyEngine._compute_river_outcome_thresholds(chance)
                 river_risks[method_key] = {
                     "mishap_chance_pct": round(chance * 100),
                     "label": label,
+                    "outcomes": {
+                        outcome: round((high - low) * 100)
+                        for outcome, (low, high) in thresholds.items()
+                    },
                 }
             ferry_cost = (len(alive_members) * FERRY_COST_PER_PERSON) + (party.inventory.oxen * FERRY_COST_PER_OXEN)
             river_risks["ferry_cost"] = ferry_cost
@@ -1163,46 +1194,85 @@ class PartyEngine:
                 result["message"] = "Couldn't afford the ferry! Attempting to ford... "
 
         mishap_chance = RIVER_MISHAP_CHANCES.get(depth_cat, {}).get(method_key, 0.0)
+        thresholds = self._compute_river_outcome_thresholds(mishap_chance)
+        roll = self.rng.random()
+        outcome = self._get_river_outcome(roll, thresholds)
 
-        if self._roll_probability(mishap_chance):
-            # Mishap occurred
+        if outcome == "perfect":
+            result["message"] += "Perfect crossing! The river was calm and the crossing went smoothly."
+            alive = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
+            if alive:
+                bonus_victim = self.rng.choice(alive)
+                self._improve_health(players[bonus_victim])
+                result["message"] += f" {players[bonus_victim].name} is in high spirits."
+
+        elif outcome == "successful":
+            result["message"] += "Crossing successful! You made it across safely."
+
+        elif outcome == "difficult":
             result["success"] = False
-            mishap_type = self.rng.choice(["supplies", "oxen", "injury"])
+            # Minor supply loss only
+            lost_food = min(party.inventory.food, self.rng.randint(10, 40))
+            party.inventory.food -= lost_food
+            result["message"] += f"Difficult crossing. The wagon got stuck and you lost {lost_food} lbs of food."
+            result["losses"].append(f"{lost_food} food")
 
-            if mishap_type == "supplies":
-                lost_food = min(party.inventory.food, self.rng.randint(50, 150))
-                lost_clothes = min(party.inventory.clothing, self.rng.randint(0, 3))
-                party.inventory.food -= lost_food
-                party.inventory.clothing -= lost_clothes
-                result["message"] += f"Disaster! Lost {lost_food} lbs of food and {lost_clothes} sets of clothing."
-                result["losses"].append(f"{lost_food} food")
-
-            elif mishap_type == "oxen":
-                if party.inventory.oxen > 0:
-                    lost = self.rng.randint(1, min(2, party.inventory.oxen))
-                    party.inventory.oxen -= lost
-                    result["message"] += f"Disaster! {lost} oxen drowned."
-                    result["losses"].append(f"{lost} oxen")
-
-            elif mishap_type == "injury":
+        elif outcome == "near_disaster":
+            result["success"] = False
+            # Major supply loss
+            lost_food = min(party.inventory.food, self.rng.randint(50, 150))
+            lost_clothes = min(party.inventory.clothing, self.rng.randint(1, 3))
+            party.inventory.food -= lost_food
+            party.inventory.clothing -= lost_clothes
+            result["message"] += f"Near disaster! Lost {lost_food} lbs of food and {lost_clothes} sets of clothing."
+            result["losses"].extend([f"{lost_food} food", f"{lost_clothes} clothing"])
+            # Plus oxen loss OR injury
+            if party.inventory.oxen > 0 and self.rng.random() < 0.5:
+                lost = self.rng.randint(1, min(2, party.inventory.oxen))
+                party.inventory.oxen -= lost
+                result["message"] += f" {lost} oxen drowned."
+                result["losses"].append(f"{lost} oxen")
+            else:
                 alive = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
                 if alive:
                     victim = self.rng.choice(alive)
                     self._worsen_health(players[victim])
-                    result["message"] += f"Disaster! {players[victim].name} was injured."
+                    result["message"] += f" {players[victim].name} was injured."
                     result["losses"].append(f"{players[victim].name} injured")
 
-            # If ford was chosen and very deep, chance of death
+        elif outcome == "disaster":
+            result["success"] = False
+            # Catastrophic failure: major supply loss
+            lost_food = min(party.inventory.food, self.rng.randint(100, 200))
+            lost_clothes = min(party.inventory.clothing, self.rng.randint(2, 5))
+            party.inventory.food -= lost_food
+            party.inventory.clothing -= lost_clothes
+            result["message"] += f"Catastrophic failure! Lost {lost_food} lbs of food and {lost_clothes} sets of clothing."
+            result["losses"].extend([f"{lost_food} food", f"{lost_clothes} clothing"])
+            # Oxen loss
+            if party.inventory.oxen > 0:
+                lost = self.rng.randint(1, min(3, party.inventory.oxen))
+                party.inventory.oxen -= lost
+                result["message"] += f" {lost} oxen drowned."
+                result["losses"].append(f"{lost} oxen")
+            # Injuries to 1-2 members
+            alive = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
+            if alive:
+                victim_count = min(self.rng.randint(1, 2), len(alive))
+                victims = self.rng.sample(alive, victim_count)
+                for v in victims:
+                    self._worsen_health(players[v])
+                names = ", ".join(players[v].name for v in victims)
+                result["message"] += f" {names} was injured."
+                result["losses"].append(f"{names} injured")
+            # Death check for ford on deep/very_deep (original mechanic, now in Disaster tier)
             if method_key == "ford" and depth_cat in ("deep", "very_deep"):
-                alive = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
                 if alive and self._roll_probability(0.3):
                     victim = self.rng.choice(alive)
                     players[victim].health_status = HealthStatus.DEAD
                     players[victim].is_alive = False
                     result["message"] += f" Tragically, {players[victim].name} drowned."
                     result["losses"].append(f"{players[victim].name} drowned")
-        else:
-            result["message"] += "Crossing successful!"
 
         party.status = "traveling"
         return party, players, result

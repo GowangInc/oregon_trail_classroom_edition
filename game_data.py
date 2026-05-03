@@ -479,6 +479,17 @@ RIVER_MISHAP_CHANCES: Dict[str, Dict[str, float]] = {
     "very_deep": {"ford": 0.80, "caulk": 0.40, "ferry": 0.0, "wait": 0.0},
 }
 
+# River crossing outcome tier proportions.
+# The roll range [0, 1-mishap_chance) is the "good zone" split into Perfect / Successful.
+# The roll range [1-mishap_chance, 1] is the "bad zone" split into Difficult / Near Disaster / Disaster.
+RIVER_OUTCOME_PROPORTIONS = {
+    "perfect": 0.25,       # top fraction of good zone
+    "successful": 0.75,    # rest of good zone
+    "difficult": 0.375,    # lower fraction of bad zone
+    "near_disaster": 0.375,  # middle fraction of bad zone
+    "disaster": 0.25,      # worst fraction of bad zone
+}
+
 
 
 # ---------------------------------------------------------------------------
