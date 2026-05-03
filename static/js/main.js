@@ -241,7 +241,7 @@ function handleStateUpdate(state) {
                 Hunting.start(state, myPlayerId);
             } else if (party && party.status === 'outfitting') {
                 UI.showScreen('outfitting');
-                UI.renderOutfittingScreen(state, myPlayerId);
+                UI.renderOutfittingScreen(state, myPlayerId, true);
             } else {
                 UI.showScreen('game');
                 UI.updateGame(state, myPlayerId);

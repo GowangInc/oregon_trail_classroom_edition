@@ -418,7 +418,7 @@ function getMyPartyId() {
 // ------------------------------------------------------------------
 // Outfitting Screen
 // ------------------------------------------------------------------
-function renderOutfittingScreen(state, myPlayerId) {
+function renderOutfittingScreen(state, myPlayerId, isFortVisit = false) {
     const party = Object.values(state.parties || {}).find(p => p.member_ids && p.member_ids.includes(myPlayerId));
     if (!party) return;
 
@@ -448,6 +448,10 @@ function renderOutfittingScreen(state, myPlayerId) {
     }
 
     const professionEl = document.getElementById('profession-selected');
+    const professionSelector = document.getElementById('profession-selector');
+    if (professionSelector) {
+        professionSelector.hidden = isFortVisit;
+    }
     if (professionEl) {
         if (party.inventory && party.inventory.money > 0) {
             professionEl.textContent = `Selected: ${party.profession || 'Unknown'}`;
@@ -472,7 +476,9 @@ function renderOutfittingScreen(state, myPlayerId) {
         if (storeFunds) storeFunds.textContent = Math.round((party.inventory ? party.inventory.money : 0) * 100) / 100;
         
         if (readyBtn) {
-            readyBtn.disabled = !isCaptain || !hasProfession || party.outfitting_complete;
+            // During a fort visit, enable the button regardless of outfitting_complete
+            readyBtn.disabled = !isCaptain;
+            readyBtn.textContent = isFortVisit ? 'LEAVE STORE' : 'READY TO DEPART';
             readyBtn.onclick = () => {
                 window.dispatchEvent(new CustomEvent('party-ready', {
                     detail: { party_id: party.party_id }
@@ -540,7 +546,7 @@ function renderOutfittingScreen(state, myPlayerId) {
     
     if (monthPanel) {
         const hasProfession = party.inventory && party.inventory.money > 0;
-        monthPanel.hidden = !hasProfession;
+        monthPanel.hidden = !hasProfession || isFortVisit;
         
         if (party.start_month) {
             monthSelected.textContent = `Selected: ${monthNames[party.start_month - 3] || 'Unknown'}`;
@@ -593,7 +599,9 @@ function renderOutfittingScreen(state, myPlayerId) {
     if (statusEl) {
         const hasProfession = party.inventory && party.inventory.money > 0;
         if (!isCaptain) {
-            statusEl.textContent = 'Waiting for the captain to finish outfitting...';
+            statusEl.textContent = isFortVisit ? 'Waiting for the captain to finish shopping...' : 'Waiting for the captain to finish outfitting...';
+        } else if (isFortVisit) {
+            statusEl.textContent = 'You are at a fort. Buy supplies, then click Leave Store to continue.';
         } else if (party.outfitting_complete) {
             statusEl.textContent = 'Your party is ready to depart!';
         } else {
