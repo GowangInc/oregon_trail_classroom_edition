@@ -307,6 +307,7 @@ class PartyEngine:
 
         # Check if all dead
         alive_members = [pid for pid in party.member_ids if players[pid].is_alive]
+        party.is_alive = bool(alive_members)
         if not alive_members and party.status != "finished":
             party.status = "dead"
             events.append({

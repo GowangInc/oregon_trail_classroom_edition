@@ -182,9 +182,13 @@ def on_disconnect():
 
     mgr = sessions.get(session_id)
     if mgr:
-        mgr.remove_player(player_id)
+        # If host disconnects, clear _host_sid so broadcasts don't emit to dead socket
         player = mgr.session.players.get(player_id)
-        if player:
+        if player and player.is_host and mgr._host_sid == request.sid:
+            mgr._host_sid = None
+            print(f"[{datetime.now()}] Host {player.name} disconnected, cleared _host_sid")
+        mgr.remove_player(player_id)
+        if player and not player.is_host:
             print(f"[{datetime.now()}] Player {player.name} disconnected")
 
 
@@ -963,6 +967,54 @@ def _broadcast_tick_result(mgr: SessionManager, result: dict):
     # Broadcast events globally
     for ev in events:
         socketio.emit("event_occurred", ev, to="global")
+
+    # Emit decision_required for any party with a new pending decision
+    for party in mgr.session.parties.values():
+        if party.decision_pending and not party.decision_pending.resolved:
+            decision_data = party.decision_pending.to_dict()
+            for pid in party.member_ids:
+                player = mgr.session.players.get(pid)
+                if player and player.socket_id and player.is_alive:
+                    socketio.emit("decision_required", {
+                        "party_id": party.party_id,
+                        "decision": decision_data,
+                    }, to=player.socket_id)
+
+    # Emit party_finished for parties that just finished or died this tick
+    finished_events = [ev for ev in events if ev.get("type") in ("finished", "dead")]
+    for ev in finished_events:
+        party = mgr.session.parties.get(ev.get("party_id"))
+        if not party:
+            continue
+        # Compute rank among finished parties
+        all_finished = [p for p in mgr.session.parties.values() if p.status == "finished"]
+        rank = all_finished.index(party) + 1 if party in all_finished else None
+        alive_members = [pid for pid in party.member_ids if mgr.session.players.get(pid, Player()).is_alive]
+        socketio.emit("party_finished", {
+            "party_id": party.party_id,
+            "party_name": party.party_name,
+            "rank": rank,
+            "survivors": len(alive_members),
+            "score": party.score,
+            "status": party.status,
+        }, to="global")
+
+    # Emit game_over if session has ended
+    if mgr.session.game_status == "ended":
+        rankings = sorted(
+            [
+                {
+                    "party_id": p.party_id,
+                    "party_name": p.party_name,
+                    "score": p.score,
+                    "status": p.status,
+                }
+                for p in mgr.session.parties.values()
+            ],
+            key=lambda x: x["score"],
+            reverse=True,
+        )
+        socketio.emit("game_over", {"final_rankings": rankings}, to="global")
 
     # Send state to host
     if mgr._host_sid:
