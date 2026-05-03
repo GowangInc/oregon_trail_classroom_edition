@@ -300,7 +300,11 @@ class SessionManager:
                         engine = self.engines.get(party.party_id)
                         if engine:
                             players = self._get_party_players(party)
-                            party, players, _ = engine.apply_decision(party, players, winner, river_depth=self._compute_river_depth())
+                            party, players, decision_events = engine.apply_decision(party, players, winner, river_depth=self._compute_river_depth())
+                            for ev in decision_events:
+                                ev["party_id"] = party.party_id
+                                ev["party_name"] = party.party_name
+                                all_events.append(ev)
                             self._update_party_and_players(party, players)
                             dirty_party_ids.add(party.party_id)
 
@@ -504,26 +508,29 @@ class SessionManager:
             river_depth = self._compute_river_depth()
             players = self._get_party_players(party)
             party, players, result = engine.resolve_river_crossing(party, players, method, river_depth)
+            death_events = engine._check_deaths(party, players, self.session.global_date)
             self._update_party_and_players(party, players)
+            result["death_events"] = death_events
             return result
 
     # ------------------------------------------------------------------
     # Host Overrides
     # ------------------------------------------------------------------
-    def host_override_decision(self, party_id: str, choice: str) -> bool:
+    def host_override_decision(self, party_id: str, choice: str) -> Tuple[bool, List[Dict[str, Any]]]:
         with self.lock:
             party = self.session.parties.get(party_id)
             if not party or not party.decision_pending:
-                return False
+                return False, []
 
             engine = self.engines.get(party_id)
             if not engine:
-                return False
+                return False, []
 
             players = self._get_party_players(party)
-            party, players, _ = engine.apply_decision(party, players, choice, river_depth=self._compute_river_depth())
+            party, players, decision_events = engine.apply_decision(party, players, choice, river_depth=self._compute_river_depth())
+            death_events = engine._check_deaths(party, players, self.session.global_date)
             self._update_party_and_players(party, players)
-            return True
+            return True, decision_events + death_events
 
     def host_edit_party(self, party_id: str, field: str, value: Any) -> bool:
         with self.lock:
@@ -580,9 +587,10 @@ class SessionManager:
             party, players, msg = engine._apply_trail_event(
                 party, players, {"id": event_id, "description": event_def.description, "requires_supplies": event_def.requires_supplies}
             )
+            death_events = engine._check_deaths(party, players, self.session.global_date)
             self._update_party_and_players(party, players)
 
-            return {"success": True, "message": msg}
+            return {"success": True, "message": msg, "death_events": death_events}
 
     def call_vote(self, party_id: str, vote_type: str) -> bool:
         """Captain-initiated vote for pace, rations, or hunt."""
@@ -760,8 +768,11 @@ class SessionManager:
             
             # If at a fort during active game, return to traveling
             if self.session.game_status == "active":
-                party.status = "traveling"
-                return {"success": True, "message": "You leave the store and return to the trail."}
+                if party.status == "outfitting":
+                    party.status = "traveling"
+                    return {"success": True, "message": "You leave the store and return to the trail."}
+                else:
+                    return {"success": False, "message": "Party is not at a store."}
 
             if self.session.game_status != "outfitting":
                 return {"success": False, "message": "Not in outfitting phase"}

@@ -211,14 +211,34 @@ function updateGame(state, myPlayerId) {
             return pl && pl.is_alive;
         }).length;
         const total = p.member_ids.length;
-        li.innerHTML = `
-            <div style="display: flex; justify-content: space-between;">
-                <span>${p.party_name}</span>
-                <span>${p.distance_traveled || 0} mi</span>
-            </div>
-            <div style="font-size: 0.85rem; opacity: 0.8;">${alive}/${total} alive · ${p.status}</div>
-            <div class="progress-bar"><div class="progress-fill" style="width: ${Math.min(100, (p.distance_traveled / 2094) * 100)}%"></div></div>
-        `;
+
+        const header = document.createElement('div');
+        header.style.cssText = 'display: flex; justify-content: space-between;';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = p.party_name;
+        header.appendChild(nameSpan);
+
+        const distSpan = document.createElement('span');
+        distSpan.textContent = `${p.distance_traveled || 0} mi`;
+        header.appendChild(distSpan);
+
+        li.appendChild(header);
+
+        const subDiv = document.createElement('div');
+        subDiv.style.cssText = 'font-size: 0.85rem; opacity: 0.8;';
+        subDiv.textContent = `${alive}/${total} alive · ${p.status}`;
+        li.appendChild(subDiv);
+
+        const progressBar = document.createElement('div');
+        progressBar.className = 'progress-bar';
+
+        const progressFill = document.createElement('div');
+        progressFill.className = 'progress-fill';
+        progressFill.style.width = `${Math.min(100, (p.distance_traveled / 2094) * 100)}%`;
+        progressBar.appendChild(progressFill);
+        li.appendChild(progressBar);
+
         els.leaderboard.appendChild(li);
     });
 
@@ -404,10 +424,13 @@ function addEventToLog(event) {
     }
 }
 
-function showGameOver(title, message, statsHtml) {
+function showGameOver(title, message, statsNode) {
     els.gameoverTitle.textContent = title;
     els.gameoverMessage.textContent = message;
-    els.gameoverStats.innerHTML = statsHtml || '';
+    els.gameoverStats.innerHTML = '';
+    if (statsNode) {
+        els.gameoverStats.appendChild(statsNode);
+    }
     showScreen('gameover');
 }
 
@@ -497,44 +520,44 @@ function renderOutfittingScreen(state, myPlayerId, isFortVisit = false) {
             wagon_tongue: 'wagon tongues',
         };
         
-        if (storeMainInput && !storeMainInput.dataset.wired) {
-            storeMainInput.dataset.wired = "true";
-            
-            // Re-disable inputs if not captain
+        if (storeMainInput) {
             storeMainInput.disabled = !isCaptain;
-            storeBuyInput.disabled = !isCaptain;
-            
-            storeMainInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    if (!isCaptain) return;
-                    const val = parseInt(storeMainInput.value, 10);
-                    if (val >= 1 && val <= 7) {
-                        const itemKey = itemsKeys[val - 1];
-                        storeMainGroup.hidden = true;
-                        storeBuyContainer.hidden = false;
-                        storeBuyPrompt.textContent = `How many ${labels[itemKey]} do you want?`;
-                        storeBuyInput.value = '';
-                        storeBuyInput.dataset.itemKey = itemKey;
-                        storeBuyInput.focus();
+            if (storeBuyInput) storeBuyInput.disabled = !isCaptain;
+            if (!storeMainInput.dataset.wired) {
+                storeMainInput.dataset.wired = "true";
+                
+                storeMainInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        if (!isCaptain) return;
+                        const val = parseInt(storeMainInput.value, 10);
+                        if (val >= 1 && val <= 7) {
+                            const itemKey = itemsKeys[val - 1];
+                            storeMainGroup.hidden = true;
+                            storeBuyContainer.hidden = false;
+                            storeBuyPrompt.textContent = `How many ${labels[itemKey]} do you want?`;
+                            storeBuyInput.value = '';
+                            storeBuyInput.dataset.itemKey = itemKey;
+                            storeBuyInput.focus();
+                        }
                     }
-                }
-            });
-            
-            storeBuyInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    if (!isCaptain) return;
-                    const qty = parseInt(storeBuyInput.value, 10) || 0;
-                    if (qty > 0) {
-                        window.dispatchEvent(new CustomEvent('buy-supplies', {
-                            detail: { party_id: party.party_id, item: storeBuyInput.dataset.itemKey, quantity: qty }
-                        }));
+                });
+                
+                storeBuyInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        if (!isCaptain) return;
+                        const qty = parseInt(storeBuyInput.value, 10) || 0;
+                        if (qty > 0) {
+                            window.dispatchEvent(new CustomEvent('buy-supplies', {
+                                detail: { party_id: party.party_id, item: storeBuyInput.dataset.itemKey, quantity: qty }
+                            }));
+                        }
+                        storeBuyContainer.hidden = true;
+                        storeMainGroup.hidden = false;
+                        storeMainInput.value = '';
+                        storeMainInput.focus();
                     }
-                    storeBuyContainer.hidden = true;
-                    storeMainGroup.hidden = false;
-                    storeMainInput.value = '';
-                    storeMainInput.focus();
-                }
-            });
+                });
+            }
         }
     }
 
@@ -552,23 +575,25 @@ function renderOutfittingScreen(state, myPlayerId, isFortVisit = false) {
             monthSelected.textContent = `Selected: ${monthNames[party.start_month - 3] || 'Unknown'}`;
         }
         
-        if (monthInput && !monthInput.dataset.wired) {
-            monthInput.dataset.wired = "true";
+        if (monthInput) {
             monthInput.disabled = !isCaptain;
-            
-            monthInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    if (!isCaptain) return;
-                    const val = parseInt(monthInput.value, 10);
-                    if (val >= 1 && val <= 5) {
-                        const actualMonth = val + 2; // 1=March(3), 5=July(7)
-                        window.dispatchEvent(new CustomEvent('choose-month', {
-                            detail: { party_id: party.party_id, month: actualMonth }
-                        }));
-                        monthInput.value = '';
+            if (!monthInput.dataset.wired) {
+                monthInput.dataset.wired = "true";
+                
+                monthInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        if (!isCaptain) return;
+                        const val = parseInt(monthInput.value, 10);
+                        if (val >= 1 && val <= 5) {
+                            const actualMonth = val + 2; // 1=March(3), 5=July(7)
+                            window.dispatchEvent(new CustomEvent('choose-month', {
+                                detail: { party_id: party.party_id, month: actualMonth }
+                            }));
+                            monthInput.value = '';
+                        }
                     }
-                }
-            });
+                });
+            }
         }
     }
 
@@ -621,22 +646,49 @@ function showEpitaphEditor(playerName, partyId, tombstoneIndex) {
     const panel = document.createElement('div');
     panel.id = 'epitaph-editor';
     panel.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 10001;';
-    panel.innerHTML = `
-        <div style="border: 2px solid var(--term-green); background: #000; padding: 1.5rem; max-width: 420px; width: 90%; box-shadow: 0 0 20px rgba(74,246,38,0.3);">
-            <h2 style="margin-top: 0; color: var(--term-green);">☗ Write an Epitaph</h2>
-            <p style="margin-bottom: 0.5rem;"><strong>${playerName}</strong> has died. What should the tombstone say?</p>
-            <textarea class="terminal-input epitaph-text" rows="3" style="width: 100%; margin-bottom: 1rem; resize: none;" placeholder="Here lies..." maxlength="200"></textarea>
-            <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
-                <button class="terminal-btn epitaph-cancel" style="min-width: auto;">Skip</button>
-                <button class="terminal-btn epitaph-submit" style="min-width: auto; color: var(--term-green); border-color: var(--term-green);">Write Epitaph</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(panel);
 
-    const textarea = panel.querySelector('.epitaph-text');
-    const cancelBtn = panel.querySelector('.epitaph-cancel');
-    const submitBtn = panel.querySelector('.epitaph-submit');
+    const box = document.createElement('div');
+    box.style.cssText = 'border: 2px solid var(--term-green); background: #000; padding: 1.5rem; max-width: 420px; width: 90%; box-shadow: 0 0 20px rgba(74,246,38,0.3);';
+
+    const h2 = document.createElement('h2');
+    h2.style.cssText = 'margin-top: 0; color: var(--term-green);';
+    h2.textContent = '☗ Write an Epitaph';
+    box.appendChild(h2);
+
+    const p = document.createElement('p');
+    p.style.marginBottom = '0.5rem';
+    const strong = document.createElement('strong');
+    strong.textContent = playerName;
+    p.appendChild(strong);
+    p.appendChild(document.createTextNode(' has died. What should the tombstone say?'));
+    box.appendChild(p);
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'terminal-input epitaph-text';
+    textarea.rows = 3;
+    textarea.style.cssText = 'width: 100%; margin-bottom: 1rem; resize: none;';
+    textarea.placeholder = 'Here lies...';
+    textarea.maxLength = 200;
+    box.appendChild(textarea);
+
+    const btnDiv = document.createElement('div');
+    btnDiv.style.cssText = 'display: flex; gap: 0.5rem; justify-content: flex-end;';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'terminal-btn epitaph-cancel';
+    cancelBtn.style.minWidth = 'auto';
+    cancelBtn.textContent = 'Skip';
+    btnDiv.appendChild(cancelBtn);
+
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'terminal-btn epitaph-submit';
+    submitBtn.style.cssText = 'min-width: auto; color: var(--term-green); border-color: var(--term-green);';
+    submitBtn.textContent = 'Write Epitaph';
+    btnDiv.appendChild(submitBtn);
+
+    box.appendChild(btnDiv);
+    panel.appendChild(box);
+    document.body.appendChild(panel);
 
     cancelBtn.onclick = () => panel.remove();
     submitBtn.onclick = () => {

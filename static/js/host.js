@@ -466,18 +466,24 @@ function renderOutfittingProgress(state) {
         div.style.marginBottom = '0.5rem';
         const inv = party.inventory || {};
         const prof = party.profession || 'Not chosen';
-        div.innerHTML = `
-            <div style="display: flex; justify-content: space-between;">
-                <strong>${party.party_name}</strong>
-                <span style="color: ${party.outfitting_complete ? 'var(--term-green)' : 'var(--term-warn)'};">${party.outfitting_complete ? 'READY' : 'OUTFITTING'}</span>
-            </div>
-            <div style="font-size: 0.85rem;">
-                Profession: ${prof} · Money: $${Math.round(inv.money * 100) / 100}
-                · Oxen: ${inv.oxen || 0} · Food: ${inv.food || 0} lbs
-                · Clothing: ${inv.clothing || 0} · Bullets: ${inv.bullets || 0}
-                · Wheels: ${inv.wagon_wheels || 0} · Axles: ${inv.wagon_axles || 0} · Tongues: ${inv.wagon_tongues || 0}
-            </div>
-        `;
+        const header = document.createElement('div');
+        header.style.cssText = 'display: flex; justify-content: space-between;';
+
+        const nameStrong = document.createElement('strong');
+        nameStrong.textContent = party.party_name;
+        header.appendChild(nameStrong);
+
+        const statusSpan = document.createElement('span');
+        statusSpan.style.color = party.outfitting_complete ? 'var(--term-green)' : 'var(--term-warn)';
+        statusSpan.textContent = party.outfitting_complete ? 'READY' : 'OUTFITTING';
+        header.appendChild(statusSpan);
+
+        const details = document.createElement('div');
+        details.style.fontSize = '0.85rem';
+        details.textContent = `Profession: ${prof} · Money: $${Math.round(inv.money * 100) / 100} · Oxen: ${inv.oxen || 0} · Food: ${inv.food || 0} lbs · Clothing: ${inv.clothing || 0} · Bullets: ${inv.bullets || 0} · Wheels: ${inv.wagon_wheels || 0} · Axles: ${inv.wagon_axles || 0} · Tongues: ${inv.wagon_tongues || 0}`;
+
+        div.appendChild(header);
+        div.appendChild(details);
         els.partiesContainer.appendChild(div);
     });
 }
@@ -494,12 +500,28 @@ function renderTombstones(state) {
     tombstones.forEach((ts, idx) => {
         const div = document.createElement('div');
         div.style.cssText = 'margin-bottom: 0.5rem; border-bottom: 1px solid rgba(102,204,255,0.2); padding-bottom: 0.3rem;';
-        div.innerHTML = `
-            <div><strong>${ts.player_name}</strong> — ${ts.cause} @ mile ${ts.mile_marker}</div>
-            <div style="font-style: italic; opacity: 0.9;">"${ts.epitaph}"</div>
-            <button class="terminal-btn" style="min-width: auto; font-size: 0.75rem; padding: 0.2rem 0.4rem; margin-top: 0.2rem;"
-                onclick="window.__hostEditTombstone(${idx}, '${(ts.epitaph || '').replace(/'/g, "\\'")}')">EDIT</button>
-        `;
+
+        const line1 = document.createElement('div');
+        const strong = document.createElement('strong');
+        strong.textContent = ts.player_name;
+        line1.appendChild(strong);
+        line1.appendChild(document.createTextNode(` — ${ts.cause} @ mile ${ts.mile_marker}`));
+        div.appendChild(line1);
+
+        const line2 = document.createElement('div');
+        line2.style.cssText = 'font-style: italic; opacity: 0.9;';
+        line2.textContent = `"${ts.epitaph}"`;
+        div.appendChild(line2);
+
+        const btn = document.createElement('button');
+        btn.className = 'terminal-btn';
+        btn.style.cssText = 'min-width: auto; font-size: 0.75rem; padding: 0.2rem 0.4rem; margin-top: 0.2rem;';
+        btn.textContent = 'EDIT';
+        btn.onclick = () => {
+            window.__hostEditTombstone(idx, ts.epitaph || '');
+        };
+        div.appendChild(btn);
+
         container.appendChild(div);
     });
 }
@@ -527,33 +549,64 @@ function renderDashboard(state) {
 
         const healths = party.member_ids.map(mid => state.players[mid]?.health_status || '?').join(', ');
 
-        card.innerHTML = `
-            <div style="display: flex; justify-content: space-between;">
-                <strong>${party.party_name}</strong>
-                <span>${party.status}</span>
-            </div>
-            <div class="progress-bar" style="margin: 0.3rem 0;">
-                <div class="progress-fill" style="width: ${Math.min(100, (party.distance_traveled / 2094) * 100)}%"></div>
-            </div>
-            <div style="font-size: 0.9rem; display: flex; gap: 1rem; flex-wrap: wrap;">
-                <span>${party.distance_traveled} mi</span>
-                <span>${alive}/${party.member_ids.length} alive</span>
-                <span>Pace: ${party.pace}</span>
-                <span>Rations: ${party.rations}</span>
-                <span>Food: ${party.inventory?.food || 0}</span>
-                <span>Oxen: ${party.inventory?.oxen || 0}</span>
-                <span>Health: ${healths}</span>
-            </div>
-            ${party.decision_pending ? `
-                <div style="margin-top: 0.3rem; font-size: 0.85rem; color: var(--term-warn);">
-                    Decision: ${party.decision_pending.prompt}
-                    <button class="terminal-btn" style="min-width: auto; font-size: 0.8rem; padding: 0.2rem 0.4rem; margin-left: 0.5rem;"
-                        onclick="window.__hostForceDecision('${party.party_id}', '${party.decision_pending.options[0]}')">
-                        Force: ${party.decision_pending.options[0]}
-                    </button>
-                </div>
-            ` : ''}
-        `;
+        const header = document.createElement('div');
+        header.style.cssText = 'display: flex; justify-content: space-between;';
+
+        const nameStrong = document.createElement('strong');
+        nameStrong.textContent = party.party_name;
+        header.appendChild(nameStrong);
+
+        const statusSpan = document.createElement('span');
+        statusSpan.textContent = party.status;
+        header.appendChild(statusSpan);
+
+        card.appendChild(header);
+
+        const progressBar = document.createElement('div');
+        progressBar.className = 'progress-bar';
+        progressBar.style.margin = '0.3rem 0';
+
+        const progressFill = document.createElement('div');
+        progressFill.className = 'progress-fill';
+        progressFill.style.width = `${Math.min(100, (party.distance_traveled / 2094) * 100)}%`;
+        progressBar.appendChild(progressFill);
+        card.appendChild(progressBar);
+
+        const statsDiv = document.createElement('div');
+        statsDiv.style.cssText = 'font-size: 0.9rem; display: flex; gap: 1rem; flex-wrap: wrap;';
+
+        const stats = [
+            `${party.distance_traveled} mi`,
+            `${alive}/${party.member_ids.length} alive`,
+            `Pace: ${party.pace}`,
+            `Rations: ${party.rations}`,
+            `Food: ${party.inventory?.food || 0}`,
+            `Oxen: ${party.inventory?.oxen || 0}`,
+            `Health: ${healths}`,
+        ];
+        stats.forEach(text => {
+            const span = document.createElement('span');
+            span.textContent = text;
+            statsDiv.appendChild(span);
+        });
+        card.appendChild(statsDiv);
+
+        if (party.decision_pending) {
+            const decisionDiv = document.createElement('div');
+            decisionDiv.style.cssText = 'margin-top: 0.3rem; font-size: 0.85rem; color: var(--term-warn);';
+            decisionDiv.textContent = `Decision: ${party.decision_pending.prompt} `;
+
+            const forceBtn = document.createElement('button');
+            forceBtn.className = 'terminal-btn';
+            forceBtn.style.cssText = 'min-width: auto; font-size: 0.8rem; padding: 0.2rem 0.4rem; margin-left: 0.5rem;';
+            forceBtn.textContent = `Force: ${party.decision_pending.options[0]}`;
+            forceBtn.onclick = () => {
+                window.__hostForceDecision(party.party_id, party.decision_pending.options[0]);
+            };
+            decisionDiv.appendChild(forceBtn);
+            card.appendChild(decisionDiv);
+        }
+
         els.partyCards.appendChild(card);
     });
 }
@@ -608,7 +661,17 @@ function addHostLog(msg) {
         p.classList.add('host-log-tombstone');
     }
 
-    p.innerHTML = `<span style="opacity: 0.6; font-size: 0.8rem;">[${time}]</span> <span style="color: ${color};">${msg}</span>`;
+    const timeSpan = document.createElement('span');
+    timeSpan.style.cssText = 'opacity: 0.6; font-size: 0.8rem;';
+    timeSpan.textContent = `[${time}] `;
+
+    const msgSpan = document.createElement('span');
+    msgSpan.style.color = color;
+    msgSpan.textContent = msg;
+
+    p.appendChild(timeSpan);
+    p.appendChild(msgSpan);
+
     els.hostLog.appendChild(p);
     els.hostLog.scrollTop = els.hostLog.scrollHeight;
     while (els.hostLog.children.length > 500) {

@@ -26,6 +26,7 @@ sid_to_player: dict[str, str] = {}      # sid -> player_id
 
 # Auto-advance thread tracking
 auto_threads: dict[str, any] = {}
+auto_advance_generations: dict[str, int] = {}
 thread_lock = __import__('threading').Lock()
 
 # Server network info (set in __main__)
@@ -77,6 +78,10 @@ def map_view():
 @app.route("/debug/state")
 def debug_state():
     """Return raw state of all active sessions."""
+    password = request.args.get("password", "")
+    debug_password = os.environ.get("DEBUG_PASSWORD")
+    if not debug_password or password != debug_password:
+        return {"error": "Forbidden"}, 403
     data = {}
     for sid, mgr in sessions.items():
         data[sid] = _host_state(mgr)
@@ -306,11 +311,16 @@ def on_assign_party(data):
 
     player_id = data.get("player_id")
     party_id = data.get("party_id")
+    with mgr.lock:
+        player = mgr.session.players.get(player_id)
+        old_party_id = player.party_id if player else None
     success = mgr.assign_player_to_party(player_id, party_id)
 
     if success:
         player = mgr.session.players.get(player_id)
         if player and player.socket_id:
+            if old_party_id:
+                leave_room(f"party_{old_party_id}", sid=player.socket_id)
             leave_room("global", sid=player.socket_id)
             join_room(f"party_{party_id}", sid=player.socket_id)
             join_room("global", sid=player.socket_id)
@@ -330,7 +340,27 @@ def on_shuffle_parties(data=None):
     if not mgr:
         return
 
+    with mgr.lock:
+        old_assignments = {
+            pid: player.party_id
+            for pid, player in mgr.session.players.items()
+            if not player.is_host
+        }
+
     mgr.shuffle_parties()
+
+    with mgr.lock:
+        for pid, player in mgr.session.players.items():
+            if player.is_host or not player.socket_id:
+                continue
+            old_party_id = old_assignments.get(pid)
+            new_party_id = player.party_id
+            if old_party_id != new_party_id:
+                if old_party_id:
+                    leave_room(f"party_{old_party_id}", sid=player.socket_id)
+                if new_party_id:
+                    join_room(f"party_{new_party_id}", sid=player.socket_id)
+
     _broadcast_session_state(mgr)
 
 
@@ -415,6 +445,13 @@ def on_quick_start(data=None):
         if not mgr.session.parties:
             mgr.create_party("Wagon Party 1")
 
+        # Capture old party assignments before shuffle
+        old_assignments = {
+            pid: player.party_id
+            for pid, player in mgr.session.players.items()
+            if not player.is_host
+        }
+
         # Assign all unassigned players to parties evenly
         mgr.shuffle_parties()
 
@@ -448,7 +485,20 @@ def on_quick_start(data=None):
 
         mgr.begin_journey()
         mgr.set_auto_advance(True, DEFAULT_AUTO_ADVANCE_INTERVAL)
-    
+
+    # Fix Socket.IO rooms after shuffle
+    with mgr.lock:
+        for pid, player in mgr.session.players.items():
+            if player.is_host or not player.socket_id:
+                continue
+            old_party_id = old_assignments.get(pid)
+            new_party_id = player.party_id
+            if old_party_id != new_party_id:
+                if old_party_id:
+                    leave_room(f"party_{old_party_id}", sid=player.socket_id)
+                if new_party_id:
+                    join_room(f"party_{new_party_id}", sid=player.socket_id)
+
     _start_auto_advance(mgr)
     _broadcast_session_state(mgr)
     print(f"[{datetime.now()}] Quick start in session {mgr.session.session_code}")
@@ -581,9 +631,12 @@ def on_buy_item(data):
         return
 
     party_id = data.get("party_id")
-    item = data.get("item")
-    quantity = data.get("quantity", 1)
-    result = mgr.buy_item(party_id, item, quantity)
+    with mgr.lock:
+        player = mgr.session.players.get(player_id)
+        if not player or player.party_id != party_id:
+            emit("error", {"message": "You are not a member of that party."})
+            return
+        result = mgr.buy_item(party_id, data.get("item"), data.get("quantity", 1))
 
     emit("buy_result", result)
     _broadcast_session_state(mgr)
@@ -602,11 +655,18 @@ def on_cross_river(data):
         return
 
     party_id = data.get("party_id")
-    method = data.get("method")
-    result = mgr.cross_river(party_id, method)
+    with mgr.lock:
+        player = mgr.session.players.get(player_id)
+        if not player or player.party_id != party_id:
+            emit("error", {"message": "You are not a member of that party."})
+            return
+        result = mgr.cross_river(party_id, data.get("method"))
 
     if party_id:
         socketio.emit("river_result", result, to=f"party_{party_id}")
+        for ev in result.get("death_events", []):
+            ev["party_id"] = party_id
+            socketio.emit("event_occurred", ev, to="global")
         _broadcast_session_state(mgr)
 
 
@@ -636,6 +696,9 @@ def on_advance_days(data):
         return
 
     count = data.get("count", 1)
+    if not isinstance(count, int) or count < 1 or count > 30:
+        emit("error", {"message": "Day count must be an integer between 1 and 30."})
+        return
     result = mgr.advance_days(count)
     _broadcast_tick_result(mgr, result)
 
@@ -707,6 +770,9 @@ def on_inject_event(data):
             "party_id": party_id,
             "event_description": result.get("message", ""),
         }, to="global")
+        for ev in result.get("death_events", []):
+            ev["party_id"] = party_id
+            socketio.emit("event_occurred", ev, to="global")
     _broadcast_session_state(mgr)
 
 
@@ -721,9 +787,12 @@ def on_host_override_decision(data):
 
     party_id = data.get("party_id")
     choice = data.get("choice")
-    success = mgr.host_override_decision(party_id, choice)
+    success, events = mgr.host_override_decision(party_id, choice)
 
     if success:
+        for ev in events:
+            ev["party_id"] = party_id
+            socketio.emit("event_occurred", ev, to="global")
         _broadcast_session_state(mgr)
     else:
         emit("error", {"message": "Failed to override decision."})
@@ -852,8 +921,12 @@ def on_choose_profession(data):
         return
 
     party_id = data.get("party_id")
-    profession = data.get("profession")
-    result = mgr.choose_profession(party_id, profession)
+    with mgr.lock:
+        player = mgr.session.players.get(player_id)
+        if not player or player.party_id != party_id:
+            emit("error", {"message": "You are not a member of that party."})
+            return
+        result = mgr.choose_profession(party_id, data.get("profession"))
     emit("buy_result", result)
     _broadcast_session_state(mgr)
 
@@ -870,8 +943,12 @@ def on_choose_month(data):
         return
 
     party_id = data.get("party_id")
-    start_month = data.get("month")
-    result = mgr.choose_month(party_id, start_month)
+    with mgr.lock:
+        player = mgr.session.players.get(player_id)
+        if not player or player.party_id != party_id:
+            emit("error", {"message": "You are not a member of that party."})
+            return
+        result = mgr.choose_month(party_id, data.get("month"))
     emit("buy_result", result)
     _broadcast_session_state(mgr)
 
@@ -888,9 +965,12 @@ def on_buy_supplies(data):
         return
 
     party_id = data.get("party_id")
-    item = data.get("item")
-    quantity = data.get("quantity", 1)
-    result = mgr.buy_starting_supplies(party_id, item, quantity)
+    with mgr.lock:
+        player = mgr.session.players.get(player_id)
+        if not player or player.party_id != party_id:
+            emit("error", {"message": "You are not a member of that party."})
+            return
+        result = mgr.buy_starting_supplies(party_id, data.get("item"), data.get("quantity", 1))
     emit("buy_result", result)
     _broadcast_session_state(mgr)
 
@@ -907,7 +987,12 @@ def on_party_ready(data):
         return
 
     party_id = data.get("party_id")
-    result = mgr.party_outfit_complete(party_id)
+    with mgr.lock:
+        player = mgr.session.players.get(player_id)
+        if not player or player.party_id != party_id:
+            emit("error", {"message": "You are not a member of that party."})
+            return
+        result = mgr.party_outfit_complete(party_id)
     emit("buy_result", result)
     _broadcast_session_state(mgr)
 
@@ -924,8 +1009,12 @@ def on_call_vote(data):
         return
 
     party_id = data.get("party_id")
-    vote_type = data.get("vote_type")
-    success = mgr.call_vote(party_id, vote_type)
+    with mgr.lock:
+        player = mgr.session.players.get(player_id)
+        if not player or player.party_id != party_id:
+            emit("error", {"message": "You are not a member of that party."})
+            return
+        success = mgr.call_vote(party_id, data.get("vote_type"))
     if success:
         _broadcast_session_state(mgr)
     else:
@@ -948,9 +1037,14 @@ def on_submit_epitaph(data):
     epitaph = data.get("epitaph", "")
     if contains_swear(epitaph):
         epitaph = filter_swear(epitaph, "[redacted]")
-    success = mgr.submit_epitaph(party_id, tombstone_index, epitaph)
+    with mgr.lock:
+        player = mgr.session.players.get(player_id)
+        if not player or player.party_id != party_id:
+            emit("error", {"message": "You are not a member of that party."})
+            return
+        success = mgr.submit_epitaph(party_id, tombstone_index, epitaph)
     if success:
-        socketio.emit("event_occurred", {"message": f"A new epitaph was written."}, to="global")
+        socketio.emit("event_occurred", {"message": "A new epitaph was written."}, to="global")
         _broadcast_session_state(mgr)
     else:
         emit("error", {"message": "Failed to submit epitaph."})
@@ -979,7 +1073,7 @@ def on_host_edit_tombstone(data):
 # ---------------------------------------------------------------------------
 # Auto-Advance Background Thread
 # ---------------------------------------------------------------------------
-def _auto_advance_worker(session_id: str):
+def _auto_advance_worker(session_id: str, generation: int):
     """Background loop that ticks the session at configured intervals."""
     while True:
         mgr = sessions.get(session_id)
@@ -995,12 +1089,19 @@ def _auto_advance_worker(session_id: str):
             break
         
         with mgr.lock:
+            if auto_advance_generations.get(session_id) != generation:
+                break
             if not mgr.session.auto_advance_enabled:
                 continue
             if mgr.session.game_status not in ("active",):
                 continue
 
-            result = mgr.tick()
+            try:
+                result = mgr.tick()
+            except Exception as e:
+                print(f"[{datetime.now()}] Auto-advance tick error for session {session_id}: {e}")
+                continue
+
         _broadcast_tick_result(mgr, result)
 
 
@@ -1010,7 +1111,9 @@ def _start_auto_advance(mgr: SessionManager):
         sid = mgr.session.session_id
         if sid in auto_threads:
             return
-        auto_threads[sid] = socketio.start_background_task(_auto_advance_worker, sid)
+        auto_advance_generations[sid] = auto_advance_generations.get(sid, 0) + 1
+        generation = auto_advance_generations[sid]
+        auto_threads[sid] = socketio.start_background_task(_auto_advance_worker, sid, generation)
         print(f"[{datetime.now()}] Auto-advance started for session {mgr.session.session_code}")
 
 
@@ -1020,6 +1123,7 @@ def _stop_auto_advance(mgr: SessionManager):
         sid = mgr.session.session_id
         mgr.set_auto_advance(False, mgr.session.auto_advance_interval)
         auto_threads.pop(sid, None)
+        auto_advance_generations[sid] = auto_advance_generations.get(sid, 0) + 1
         print(f"[{datetime.now()}] Auto-advance stopped for session {mgr.session.session_code}")
 
 
@@ -1084,7 +1188,13 @@ def _broadcast_tick_result(mgr: SessionManager, result: dict):
             # Compute rank among finished parties
             all_finished = [p for p in mgr.session.parties.values() if p.status == "finished"]
             rank = all_finished.index(party) + 1 if party in all_finished else None
-            alive_members = [pid for pid in party.member_ids if mgr.session.players.get(pid, Player()).is_alive]
+            alive_members = []
+            for pid in party.member_ids:
+                player = mgr.session.players.get(pid)
+                if not player:
+                    continue
+                if player.is_alive:
+                    alive_members.append(pid)
             socketio.emit("party_finished", {
                 "party_id": party.party_id,
                 "party_name": party.party_name,
@@ -1142,9 +1252,10 @@ def on_save_state(data=None):
         os.makedirs("saves", exist_ok=True)
         with mgr.lock:
             state = mgr.session.to_dict(player_id=host_id)
-        with open("saves/save.json", "w") as f:
+        filename = f"saves/save_{mgr.session.session_code}.json"
+        with open(filename, "w") as f:
             json.dump(state, f, indent=2)
-        emit("event_occurred", {"message": "Game state saved to disk!"})
+        emit("event_occurred", {"message": f"Game state saved to {filename}!"})
     except Exception as e:
         emit("error", {"message": f"Failed to save state: {str(e)}"})
 
@@ -1158,24 +1269,40 @@ def on_load_state(data=None):
     import json
     import os
     try:
-        if not os.path.exists("saves/save.json"):
-            emit("error", {"message": "No save file found."})
+        session_code = (data or {}).get("session_code")
+        saves_dir = "saves"
+        if not session_code:
+            if not os.path.exists(saves_dir):
+                emit("error", {"message": "No saves directory found."})
+                return
+            files = [f for f in os.listdir(saves_dir) if f.startswith("save_") and f.endswith(".json")]
+            codes = [f[5:-5] for f in files]
+            emit("event_occurred", {"message": f"Available saves: {', '.join(codes) if codes else 'None'}"})
             return
-        with open("saves/save.json", "r") as f:
-            data = json.load(f)
+
+        filepath = os.path.join(saves_dir, f"save_{session_code}.json")
+        if not os.path.exists(filepath):
+            emit("error", {"message": f"No save file found for session code {session_code}."})
+            return
+        with open(filepath, "r") as f:
+            loaded_data = json.load(f)
         
         # We need to preserve the current session's host connection details
         current_session_id = mgr.session.session_id
         current_session_code = mgr.session.session_code
         
-        if mgr.load_from_dict(data):
+        if mgr.load_from_dict(loaded_data):
             # Restore the active session identifiers so routing still works
             mgr.session.session_id = current_session_id
             mgr.session.session_code = current_session_code
             mgr.session.host_player_id = host_id
+
+            # Rebuild global player_to_session mapping
+            for pid in mgr.session.players:
+                player_to_session[pid] = current_session_id
             
             _broadcast_session_state(mgr)
-            emit("event_occurred", {"message": "Game state loaded successfully!"})
+            emit("event_occurred", {"message": f"Game state loaded from {filepath}!"})
         else:
             emit("error", {"message": "Failed to parse save file."})
     except Exception as e:

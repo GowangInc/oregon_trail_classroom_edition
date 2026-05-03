@@ -106,8 +106,11 @@ class PartyEngine:
     ) -> Tuple[Party, Dict[str, Player], List[Dict[str, Any]]]:
         """Advance one day for this party. Returns (party, players, events)."""
         events: List[Dict[str, Any]] = []
+        original_tombstones = getattr(party, '_global_tombstones', [])
         party = deepcopy(party)
         players = {pid: deepcopy(p) for pid, p in players.items()}
+        party._global_tombstones = original_tombstones
+        party.member_ids = [pid for pid in party.member_ids if pid in players]
         party.global_date = global_date
 
         # If party is finished, dead, hunting, or outfitting, nothing happens
@@ -148,7 +151,7 @@ class PartyEngine:
                 party.days_at_current_location += 1
 
         # 2. Consume food
-        alive_members = [pid for pid in party.member_ids if players[pid].is_alive]
+        alive_members = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
         food_consumed = self._consume_food(party, len(alive_members))
 
         if not decision_pending:
@@ -306,7 +309,7 @@ class PartyEngine:
                     )
 
         # Check if all dead
-        alive_members = [pid for pid in party.member_ids if players[pid].is_alive]
+        alive_members = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
         party.is_alive = bool(alive_members)
         if not alive_members and party.status != "finished":
             party.status = "dead"
@@ -480,7 +483,7 @@ class PartyEngine:
         elif event_id == "bad_water":
             # 50% chance per member to lose health
             for pid in party.member_ids:
-                if players[pid].is_alive and self._roll_probability(0.5):
+                if pid in players and players[pid].is_alive and self._roll_probability(0.5):
                     self._worsen_health(players[pid])
             msg += " Some of the party feels sick."
 
@@ -489,7 +492,7 @@ class PartyEngine:
             # So instead, we consume extra food and take health penalty.
             party.inventory.food = max(0, party.inventory.food - 10)
             # One random member takes a health hit from the stress
-            alive_pids = [pid for pid in party.member_ids if players[pid].is_alive]
+            alive_pids = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
             if alive_pids:
                 victim = self.rng.choice(alive_pids)
                 self._worsen_health(players[victim])
@@ -513,7 +516,7 @@ class PartyEngine:
             party.inventory.food = max(0, party.inventory.food - 5)
             # 50% chance per member to be affected
             for pid in party.member_ids:
-                if players[pid].is_alive and self._roll_probability(0.5):
+                if pid in players and players[pid].is_alive and self._roll_probability(0.5):
                     self._worsen_health(players[pid])
             msg += " The rough going has exhausted the party."
 
@@ -526,10 +529,10 @@ class PartyEngine:
             # Severe: halt travel, health decline for all, food loss
             party.inventory.food = max(0, party.inventory.food - 20)
             for pid in party.member_ids:
-                if players[pid].is_alive:
+                if pid in players and players[pid].is_alive:
                     self._worsen_health(players[pid])
                     # Extra damage if clothing is insufficient
-                    alive_count = len([p for p in party.member_ids if players[p].is_alive])
+                    alive_count = len([p for p in party.member_ids if p in players and players[p].is_alive])
                     if party.inventory.clothing < alive_count:
                         self._worsen_health(players[pid])
             msg += " The blizzard has caused severe damage. The party is trapped!"
@@ -593,7 +596,7 @@ class PartyEngine:
     ) -> Tuple[Party, Dict[str, Player], List[Dict[str, Any]]]:
         """Update health for all party members."""
         events = []
-        alive_members = [pid for pid in party.member_ids if players[pid].is_alive]
+        alive_members = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
         if not alive_members:
             return party, players, events
 
@@ -640,6 +643,8 @@ class PartyEngine:
             party._starvation_days = 0
 
         for pid in alive_members:
+            if pid not in players:
+                continue
             player = players[pid]
             # Apply daily health drift
             total_impact = pace_impact + rations_impact + weather_impact + food_penalty + clothing_penalty
@@ -712,7 +717,7 @@ class PartyEngine:
     def _apply_rest_recovery(self, party: Party, players: Dict[str, Player]):
         """Improve health during rest days."""
         for pid in party.member_ids:
-            if players[pid].is_alive:
+            if pid in players and players[pid].is_alive:
                 self._improve_health(players[pid])
                 # Second improvement if very poor
                 if players[pid].health_status == HealthStatus.VERY_POOR and self._roll_probability(0.5):
@@ -730,6 +735,8 @@ class PartyEngine:
         
         # Determine who's dying today (excluding captain protection logic)
         for pid in party.member_ids:
+            if pid not in players:
+                continue
             player = players[pid]
             if player.is_alive and player.health_status == HealthStatus.DEAD:
                 # Wagon leader dies last: if this is the captain and others
@@ -737,7 +744,7 @@ class PartyEngine:
                 if pid == party.captain_id:
                     other_alive = [
                         p for p in party.member_ids 
-                        if p != pid and players[p].is_alive
+                        if p != pid and p in players and players[p].is_alive
                     ]
                     if other_alive:
                         player.health_status = HealthStatus.VERY_POOR
@@ -890,7 +897,7 @@ class PartyEngine:
                 party.distance_traveled = max(party.distance_traveled, 1100)
                 # Risk: health penalty for the rough shortcut
                 for pid in party.member_ids:
-                    if players[pid].is_alive and self._roll_probability(0.3):
+                    if pid in players and players[pid].is_alive and self._roll_probability(0.3):
                         self._worsen_health(players[pid])
                 party.status = "traveling"
             elif "Barlow" in choice or "Toll Road" in choice:
@@ -905,7 +912,7 @@ class PartyEngine:
                         lost_food = min(party.inventory.food, self.rng.randint(30, 80))
                         party.inventory.food -= lost_food
                         events.append({"type": "trail_event", "event_id": "columbia_mishap", "message": f"The raft struck rocks! Lost {lost_food} lbs of food."})
-                        alive = [pid for pid in party.member_ids if players[pid].is_alive]
+                        alive = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
                         if alive and self._roll_probability(0.2):
                             victim = self.rng.choice(alive)
                             self._worsen_health(players[victim])
@@ -919,7 +926,7 @@ class PartyEngine:
                     lost_food = min(party.inventory.food, self.rng.randint(30, 80))
                     party.inventory.food -= lost_food
                     events.append({"type": "trail_event", "event_id": "columbia_mishap", "message": f"The raft struck rocks! Lost {lost_food} lbs of food."})
-                    alive = [pid for pid in party.member_ids if players[pid].is_alive]
+                    alive = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
                     if alive and self._roll_probability(0.2):
                         victim = self.rng.choice(alive)
                         self._worsen_health(players[victim])
@@ -937,7 +944,7 @@ class PartyEngine:
                     else:
                         party.distance_traveled = max(0, party.distance_traveled - 10)
                         for pid in party.member_ids:
-                            if players[pid].is_alive and self._roll_probability(0.5):
+                            if pid in players and players[pid].is_alive and self._roll_probability(0.5):
                                 self._worsen_health(players[pid])
                         events.append({"type": "decision", "message": "Shortcut was a dead end! Lost time and health."})
                 else:
@@ -1017,7 +1024,7 @@ class PartyEngine:
             return party, players, result
 
         if method_key == "ferry":
-            alive_count = len([pid for pid in party.member_ids if players[pid].is_alive])
+            alive_count = len([pid for pid in party.member_ids if pid in players and players[pid].is_alive])
             ferry_cost = (alive_count * FERRY_COST_PER_PERSON) + (party.inventory.oxen * FERRY_COST_PER_OXEN)
             if party.inventory.money >= ferry_cost:
                 party.inventory.money -= ferry_cost
@@ -1051,7 +1058,7 @@ class PartyEngine:
                     result["losses"].append(f"{lost} oxen")
 
             elif mishap_type == "injury":
-                alive = [pid for pid in party.member_ids if players[pid].is_alive]
+                alive = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
                 if alive:
                     victim = self.rng.choice(alive)
                     self._worsen_health(players[victim])
@@ -1060,10 +1067,11 @@ class PartyEngine:
 
             # If ford was chosen and very deep, chance of death
             if method_key == "ford" and depth_cat in ("deep", "very_deep"):
-                alive = [pid for pid in party.member_ids if players[pid].is_alive]
+                alive = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
                 if alive and self._roll_probability(0.3):
                     victim = self.rng.choice(alive)
                     players[victim].health_status = HealthStatus.DEAD
+                    players[victim].is_alive = False
                     result["message"] += f" Tragically, {players[victim].name} drowned."
                     result["losses"].append(f"{players[victim].name} drowned")
         else:
@@ -1079,6 +1087,10 @@ class PartyEngine:
         """Buy items at a store. Returns (party, result)."""
         result = {"success": False, "message": ""}
         from game_data import STORE_PRICES
+
+        if quantity <= 0:
+            result["message"] = "Quantity must be greater than 0."
+            return party, result
 
         # Check for spare parts caps
         if item in ("wagon_wheel", "wagon_axle", "wagon_tongue"):
@@ -1130,7 +1142,7 @@ class PartyEngine:
     # ------------------------------------------------------------------
     def _calculate_score(self, party: Party, players: Dict[str, Player]) -> int:
         """Calculate final score for a finished party."""
-        alive = [pid for pid in party.member_ids if players[pid].is_alive]
+        alive = [pid for pid in party.member_ids if pid in players and players[pid].is_alive]
         score = len(alive) * SCORE_SURVIVOR
         score += party.inventory.oxen * SCORE_OXEN
         score += party.inventory.wagon_wheels * SCORE_SPARE_PART

@@ -90,12 +90,17 @@ Network.on('onPlayerDied', (data) => {
 Network.on('onPartyFinished', (data) => {
     UI.addEventToLog({ type: 'landmark', message: `${data.party_name || 'A party'} has reached Oregon!` });
     if (data.party_id === myPartyId) {
-        const stats = `
-            <p>Rank: ${data.rank || '?'}</p>
-            <p>Survivors: ${data.survivors || 0}</p>
-            <p>Score: ${data.score || 0}</p>
-        `;
-        UI.showGameOver('OREGON CITY', 'You have completed the journey!', stats);
+        const statsDiv = document.createElement('div');
+        const rankP = document.createElement('p');
+        rankP.textContent = `Rank: ${data.rank || '?'}`;
+        const survP = document.createElement('p');
+        survP.textContent = `Survivors: ${data.survivors || 0}`;
+        const scoreP = document.createElement('p');
+        scoreP.textContent = `Score: ${data.score || 0}`;
+        statsDiv.appendChild(rankP);
+        statsDiv.appendChild(survP);
+        statsDiv.appendChild(scoreP);
+        UI.showGameOver('OREGON CITY', 'You have completed the journey!', statsDiv);
     }
 });
 
@@ -112,9 +117,18 @@ Network.on('onHostInjectedEvent', (data) => {
 });
 
 Network.on('onGameOver', (data) => {
-    const rankings = (data.final_rankings || []).map((r, i) => `${i + 1}. ${r.party_name} — Score: ${r.score}`).join('<br>');
+    const rankingsDiv = document.createElement('div');
+    const titleP = document.createElement('p');
+    titleP.textContent = 'Final Rankings:';
+    rankingsDiv.appendChild(titleP);
+
+    const listP = document.createElement('p');
+    const rankings = (data.final_rankings || []).map((r, i) => `${i + 1}. ${r.party_name} — Score: ${r.score}`);
+    listP.textContent = rankings.join('\n');
+    rankingsDiv.appendChild(listP);
+
     if (UI.getMyPartyId()) {
-        UI.showGameOver('GAME OVER', 'The trail has claimed its toll.', `<p>Final Rankings:</p><p>${rankings}</p>`);
+        UI.showGameOver('GAME OVER', 'The trail has claimed its toll.', rankingsDiv);
     }
 });
 
@@ -219,6 +233,7 @@ function handleStateUpdate(state) {
     myPlayerId = Network.getPlayerId();
     const me = state.players[myPlayerId];
     if (!me) return;
+    myPartyId = me.party_id;
 
     // Determine which screen to show
     const gameStatus = state.game_status;
@@ -250,6 +265,4 @@ function handleStateUpdate(state) {
     } else if (gameStatus === 'ended') {
         UI.showScreen('gameover');
     }
-
-    myPartyId = me.party_id;
 }
