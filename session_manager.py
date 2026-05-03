@@ -51,6 +51,11 @@ class SessionManager:
         # Load persistent tombstones
         self._load_persistent_tombstones()
 
+        # Delta-state broadcast optimization
+        self.state_version = 0
+        self.last_sent_host_state: Optional[dict] = None
+        self.last_sent_states: Dict[str, Any] = {}
+
     # ------------------------------------------------------------------
     # Player & Party Management
     # ------------------------------------------------------------------
@@ -202,6 +207,15 @@ class SessionManager:
 
             self.session.game_status = "active"
 
+            # Sync session global date to the earliest chosen departure month
+            # so party-specific start months are actually honoured by tick().
+            chosen_months = [
+                getattr(p, 'start_month', 3)
+                for p in self.session.parties.values()
+            ]
+            departure_month = min(chosen_months) if chosen_months else 3
+            self.session.global_date = date(1848, departure_month, 1)
+
             for party in self.session.parties.values():
                 # Set starting date based on selected month
                 start_month = getattr(party, 'start_month', 3)  # Default to March
@@ -264,9 +278,11 @@ class SessionManager:
         """Advance one global day. Returns snapshot for broadcasting."""
         with self.lock:
             if self.session.game_status not in ("active",):
-                return {"session_state": self.get_host_state(), "events": []}
+                return {"session_state": self.get_host_state(), "events": [], "dirty_party_ids": set()}
 
+            self.state_version += 1
             self.session.tick_count += 1
+            dirty_party_ids: set[str] = set()
 
             # 1. Resolve pending decisions with defaults
             for party in self.session.parties.values():
@@ -286,6 +302,7 @@ class SessionManager:
                             players = self._get_party_players(party)
                             party, players, _ = engine.apply_decision(party, players, winner, river_depth=self._compute_river_depth())
                             self._update_party_and_players(party, players)
+                            dirty_party_ids.add(party.party_id)
 
             # 2. Tick each active party
             all_events = []
@@ -305,6 +322,7 @@ class SessionManager:
                 )
                 del party._global_tombstones
                 self._update_party_and_players(party, players)
+                dirty_party_ids.add(party.party_id)
 
                 # Auto-vote NPCs on any new decision
                 if party.decision_pending and not party.decision_pending.resolved:
@@ -346,10 +364,12 @@ class SessionManager:
             if not active_parties:
                 self.session.game_status = "ended"
                 self.session.auto_advance_enabled = False
+                dirty_party_ids.update(self.session.parties.keys())
 
             return {
                 "session_state": self.get_host_state(),
                 "events": all_events,
+                "dirty_party_ids": dirty_party_ids,
             }
 
     def advance_days(self, count: int) -> Dict[str, Any]:
@@ -517,21 +537,21 @@ class SessionManager:
             elif field == "distance_traveled":
                 party.distance_traveled = max(0, int(value))
             elif field == "money":
-                party.inventory.money = float(value)
+                party.inventory.money = max(0.0, min(float(value), 9999.0))
             elif field == "food":
-                party.inventory.food = max(0, int(value))
+                party.inventory.food = max(0, min(int(value), 9999))
             elif field == "oxen":
-                party.inventory.oxen = max(0, int(value))
+                party.inventory.oxen = max(0, min(int(value), 20))
             elif field == "clothing":
-                party.inventory.clothing = max(0, int(value))
+                party.inventory.clothing = max(0, min(int(value), 99))
             elif field == "bullets":
-                party.inventory.bullets = max(0, int(value))
+                party.inventory.bullets = max(0, min(int(value), 9999))
             elif field == "wagon_wheels":
-                party.inventory.wagon_wheels = max(0, int(value))
+                party.inventory.wagon_wheels = max(0, min(int(value), 9))
             elif field == "wagon_axles":
-                party.inventory.wagon_axles = max(0, int(value))
+                party.inventory.wagon_axles = max(0, min(int(value), 9))
             elif field == "wagon_tongues":
-                party.inventory.wagon_tongues = max(0, int(value))
+                party.inventory.wagon_tongues = max(0, min(int(value), 9))
             elif field == "pace":
                 party.pace = Pace(value) if value in [p.value for p in Pace] else party.pace
             elif field == "rations":
@@ -644,6 +664,10 @@ class SessionManager:
                 is_host=True,
             )
             self.session.players[host_id] = host
+            # Reset broadcast caches
+            self.state_version = 0
+            self.last_sent_host_state = None
+            self.last_sent_states.clear()
             return True
 
     def host_set_player_health(self, player_id: str, health_status: str) -> bool:
@@ -804,12 +828,16 @@ class SessionManager:
     def get_player_state(self, player_id: str) -> Dict[str, Any]:
         """Get trimmed state for a specific player."""
         with self.lock:
-            return self.session.to_dict(player_id=player_id)
+            state = self.session.to_dict(player_id=player_id)
+            state["state_version"] = self.state_version
+            return state
 
     def get_host_state(self) -> Dict[str, Any]:
         """Get full state for host dashboard."""
         with self.lock:
-            return self.session.get_host_dict()
+            state = self.session.get_host_dict()
+            state["state_version"] = self.state_version
+            return state
 
     def get_party_state(self, party_id: str) -> Optional[Dict[str, Any]]:
         with self.lock:

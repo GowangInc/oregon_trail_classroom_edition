@@ -112,7 +112,9 @@ def on_connect(auth):
                             "session_code": mgr.session.session_code,
                             "is_host": True,
                         })
-                        emit("session_state", _host_state(mgr))
+                        host_state = _host_state(mgr)
+                        emit("session_state", host_state)
+                        mgr.last_sent_host_state = host_state
                         print(f"[{datetime.now()}] Host {player_id} reconnected to session {mgr.session.session_code}")
                         return
 
@@ -139,7 +141,9 @@ def on_connect(auth):
             "session_code": mgr.session.session_code,
             "is_host": True,
         })
-        emit("session_state", _host_state(mgr))
+        host_state = _host_state(mgr)
+        emit("session_state", host_state)
+        mgr.last_sent_host_state = host_state
         print(f"[{datetime.now()}] Host {host_id} created session {mgr.session.session_code}")
         return
 
@@ -165,7 +169,9 @@ def on_connect(auth):
                             "is_host": player.is_host,
                         })
                         # Send current state
-                        emit("session_state", mgr.get_player_state(player_id))
+                        player_state = mgr.get_player_state(player_id)
+                        emit("session_state", player_state)
+                        mgr.last_sent_states[player_id] = player_state
                         # Re-emit pending decision so reconnected player can vote
                         if player.party_id:
                             party = mgr.session.parties.get(player.party_id)
@@ -225,7 +231,9 @@ def on_join_spectator(data=None):
     if len(sessions) == 1:
         mgr = next(iter(sessions.values()))
         join_room("global")
-        emit("session_state", _host_state(mgr))
+        host_state = _host_state(mgr)
+        emit("session_state", host_state)
+        mgr.last_sent_host_state = host_state
         print(f"[{datetime.now()}] Spectator joined session {mgr.session.session_code}")
 
 @socketio.on("join_session")
@@ -262,7 +270,9 @@ def on_join_session(data):
         "session_code": mgr.session.session_code,
         "is_host": False,
     })
-    emit("session_state", mgr.get_player_state(player.player_id))
+    player_state = mgr.get_player_state(player.player_id)
+    emit("session_state", player_state)
+    mgr.last_sent_states[player.player_id] = player_state
 
     # Notify everyone of state change
     _broadcast_session_state(mgr)
@@ -823,7 +833,9 @@ def on_new_session(data=None):
         "session_code": mgr.session.session_code,
         "is_host": True,
     })
-    emit("session_state", _host_state(mgr))
+    host_state = _host_state(mgr)
+    emit("session_state", host_state)
+    mgr.last_sent_host_state = host_state
     socketio.emit("event_occurred", {"message": "A new session has started!"}, to="global")
     print(f"[{datetime.now()}] New session started: {mgr.session.session_code}")
 
@@ -1015,24 +1027,37 @@ def _stop_auto_advance(mgr: SessionManager):
 # Broadcasting Helpers
 # ---------------------------------------------------------------------------
 def _broadcast_session_state(mgr: SessionManager):
-    """Broadcast appropriate state views to all connected clients."""
+    """Broadcast appropriate state views to all connected clients.
+    
+    Uses per-client state caches to skip redundant emits.
+    """
     with mgr.lock:
         # Host gets full state
-        if mgr._host_sid:
-            socketio.emit("session_state", _host_state(mgr), to=mgr._host_sid)
+        host_state = _host_state(mgr)
+        if mgr._host_sid and host_state != mgr.last_sent_host_state:
+            socketio.emit("session_state", host_state, to=mgr._host_sid)
+            mgr.last_sent_host_state = host_state
 
         # Players get trimmed state
         for player in mgr.session.players.values():
             if player.is_host or not player.socket_id:
                 continue
-            socketio.emit("session_state", mgr.get_player_state(player.player_id), to=player.socket_id)
+            player_state = mgr.get_player_state(player.player_id)
+            if player_state != mgr.last_sent_states.get(player.player_id):
+                socketio.emit("session_state", player_state, to=player.socket_id)
+                mgr.last_sent_states[player.player_id] = player_state
 
 
 def _broadcast_tick_result(mgr: SessionManager, result: dict):
-    """Broadcast a tick result including events."""
+    """Broadcast a tick result including events.
+    
+    Only sends state updates to players whose party is marked dirty,
+    and uses per-client state caches to avoid redundant emits.
+    """
     with mgr.lock:
         session_state = result.get("session_state", _host_state(mgr))
         events = result.get("events", [])
+        dirty_party_ids = result.get("dirty_party_ids", set())
 
         # Broadcast events globally
         for ev in events:
@@ -1086,15 +1111,22 @@ def _broadcast_tick_result(mgr: SessionManager, result: dict):
             )
             socketio.emit("game_over", {"final_rankings": rankings}, to="global")
 
-        # Send state to host
-        if mgr._host_sid:
-            socketio.emit("session_state", _host_state(mgr), to=mgr._host_sid)
+        # Send state to host (always)
+        host_state = _host_state(mgr)
+        if mgr._host_sid and host_state != mgr.last_sent_host_state:
+            socketio.emit("session_state", host_state, to=mgr._host_sid)
+            mgr.last_sent_host_state = host_state
 
-        # Send state to each player
+        # Send state only to players whose party had changes this tick
         for player in mgr.session.players.values():
             if player.is_host or not player.socket_id:
                 continue
-            socketio.emit("session_state", mgr.get_player_state(player.player_id), to=player.socket_id)
+            if player.party_id and player.party_id not in dirty_party_ids:
+                continue
+            player_state = mgr.get_player_state(player.player_id)
+            if player_state != mgr.last_sent_states.get(player.player_id):
+                socketio.emit("session_state", player_state, to=player.socket_id)
+                mgr.last_sent_states[player.player_id] = player_state
 
 
 @socketio.on("save_state")
