@@ -98,6 +98,8 @@ def test_apply_trail_event_thief(base_party, base_players):
 def test_tick_advances_day(base_party, base_players):
     engine = PartyEngine(seed=42)
     
+    base_party.status = "traveling"
+    
     # Just verify that a tick moves distance
     party, players, events = engine.tick(base_party, base_players, date(1848, 5, 1), Weather.WARM)
     

@@ -290,7 +290,7 @@ class SessionManager:
             # 2. Tick each active party
             all_events = []
             for party in self.session.parties.values():
-                if party.status in ("finished", "dead"):
+                if party.status in ("finished", "dead", "hunting", "outfitting"):
                     continue
 
                 engine = self.engines.get(party.party_id)

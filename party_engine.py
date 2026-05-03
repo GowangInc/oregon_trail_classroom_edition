@@ -110,8 +110,8 @@ class PartyEngine:
         players = {pid: deepcopy(p) for pid, p in players.items()}
         party.global_date = global_date
 
-        # If party is finished or dead, nothing happens
-        if party.status in ("finished", "dead"):
+        # If party is finished, dead, hunting, or outfitting, nothing happens
+        if party.status in ("finished", "dead", "hunting", "outfitting"):
             return party, players, events
 
         # If resting, consume rest day and skip travel

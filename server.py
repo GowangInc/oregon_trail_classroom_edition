@@ -166,6 +166,14 @@ def on_connect(auth):
                         })
                         # Send current state
                         emit("session_state", mgr.get_player_state(player_id))
+                        # Re-emit pending decision so reconnected player can vote
+                        if player.party_id:
+                            party = mgr.session.parties.get(player.party_id)
+                            if party and party.decision_pending and not party.decision_pending.resolved:
+                                emit("decision_required", {
+                                    "party_id": party.party_id,
+                                    "decision": party.decision_pending.to_dict(),
+                                })
                         print(f"[{datetime.now()}] Player {player.name} reconnected")
                         return
 
@@ -223,8 +231,16 @@ def on_join_spectator(data=None):
 @socketio.on("join_session")
 def on_join_session(data):
     name = data.get("name", "Unknown")
+    name = name.strip()
+    name = name[:30]
+    if not name:
+        emit("error", {"message": "Name cannot be empty."})
+        return
     if contains_swear(name):
-        name = filter_swear(name, "???")
+        name = filter_swear(name, "***")
+    if not name:
+        emit("error", {"message": "Name cannot be empty after filtering."})
+        return
 
     # Find the active session (there should be exactly one)
     mgr = None
@@ -368,8 +384,6 @@ def on_start_game(data=None):
 
     success = mgr.start_game()
     if success:
-        mgr.set_auto_advance(True, DEFAULT_AUTO_ADVANCE_INTERVAL)
-        _start_auto_advance(mgr)
         _broadcast_session_state(mgr)
         print(f"[{datetime.now()}] Game started in session {mgr.session.session_code}")
     else:
