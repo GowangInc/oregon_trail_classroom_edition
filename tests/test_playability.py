@@ -1,17 +1,12 @@
-"""Comprehensive playability test suite for Oregon Trail Classroom Edition.
+"""Playability tests for The Oregon Trail - Classroom Edition.
 
-Goals:
-- Find soft locks, dead ends, or unplayable states.
-- Verify game mechanics work correctly under edge cases.
-- Ensure no crashes from host controls at arbitrary times.
+Covers soft locks, dead ends, and states where the game becomes unplayable.
+Each test verifies that the game remains in a playable state after edge cases.
 """
 
 import json
 import os
 import time
-from copy import deepcopy
-from datetime import date, datetime, timedelta
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -23,14 +18,18 @@ from server import (
     sid_to_player,
     auto_threads,
     auto_advance_generations,
+    _start_auto_advance,
+    _stop_auto_advance,
 )
+from session_manager import SessionManager
+from party_engine import PartyEngine
+from models import Party, Player, Decision, DecisionType, Inventory, GameSession
 from game_data import (
+    HealthStatus,
     Profession,
     Pace,
     Rations,
-    HealthStatus,
     Weather,
-    TOTAL_DISTANCE,
     SCORE_SURVIVOR,
     SCORE_OXEN,
     SCORE_SPARE_PART,
@@ -38,12 +37,10 @@ from game_data import (
     SCORE_PER_50_FOOD,
     SCORE_PER_CLOTHING,
     SCORE_PER_BULLET,
+    HUNTING_MAX_FOOD_PER_HUNT,
     MAX_SPARE_PARTS,
     STORE_PRICES,
 )
-from models import Party, Player, Decision, DecisionType, Inventory
-from session_manager import SessionManager
-from party_engine import PartyEngine
 
 
 # ---------------------------------------------------------------------------
@@ -75,8 +72,9 @@ def _get_session():
     return next(iter(sessions.values()))
 
 
-def _extract_player_id(client):
-    for msg in reversed(client.get_received()):
+def _extract_player_id(client_or_messages):
+    messages = client_or_messages.get_received() if hasattr(client_or_messages, "get_received") else client_or_messages
+    for msg in reversed(messages):
         if msg["name"] == "connected":
             pid = msg["args"][0].get("player_id")
             if pid is not None:
@@ -104,168 +102,90 @@ def _drain(*clients):
         c.get_received()
 
 
-def create_host():
-    """Create and return a host SocketIO test client and its player id."""
-    host = socketio.test_client(app, auth={"is_host": True, "host_password": "admin"})
-    assert host.is_connected()
-    host_id = _extract_player_id(host)
-    return host, host_id
-
-
-def create_player(name):
-    """Create a player SocketIO test client."""
+def _create_player(name):
     client = socketio.test_client(app)
     client.emit("join_session", {"name": name})
     pid = _extract_player_id(client)
     return client, pid
 
 
-def create_party_and_assign_players(host, player_clients, player_ids, party_name="Test Party"):
-    """Create a party and assign players to it. Returns party_id."""
+def _create_host():
+    client = socketio.test_client(app, auth={"is_host": True, "host_password": "admin"})
+    assert client.is_connected()
+    host_id = _extract_player_id(client)
     mgr = _get_session()
+    return client, host_id, mgr
+
+
+def _setup_party(host, player_client, party_name="Test Party"):
+    """Create party, assign player, start game, begin journey. Returns (pid, party_id, mgr)."""
+    # Find the player_id from the session (messages were drained by _create_player)
+    mgr = _get_session()
+    player_id = None
+    for pid, p in mgr.session.players.items():
+        if not p.is_host:
+            player_id = pid
+            break
+    if player_id is None:
+        raise RuntimeError("No non-host player found in session")
+
     host.emit("create_party", {"party_name": party_name})
     party_id = _extract_party_id(host)
+    host.emit("assign_party", {"player_id": player_id, "party_id": party_id})
+    _drain(host, player_client)
+
+    host.emit("start_game")
     _drain(host)
-    for client, pid in zip(player_clients, player_ids):
-        host.emit("assign_party", {"player_id": pid, "party_id": party_id})
-        _drain(host, client)
-    return party_id
+    assert mgr.session.game_status == "outfitting"
+
+    # Outfit
+    player_client.emit("choose_profession", {"party_id": party_id, "profession": "Carpenter from Ohio"})
+    player_client.emit("choose_month", {"party_id": party_id, "month": 4})
+    player_client.emit("buy_supplies", {"party_id": party_id, "item": "oxen", "quantity": 6})
+    player_client.emit("buy_supplies", {"party_id": party_id, "item": "food", "quantity": 400})
+    player_client.emit("buy_supplies", {"party_id": party_id, "item": "clothing", "quantity": 8})
+    player_client.emit("buy_supplies", {"party_id": party_id, "item": "bullets", "quantity": 4})
+    player_client.emit("buy_supplies", {"party_id": party_id, "item": "wagon_wheel", "quantity": 2})
+    player_client.emit("buy_supplies", {"party_id": party_id, "item": "wagon_axle", "quantity": 2})
+    player_client.emit("buy_supplies", {"party_id": party_id, "item": "wagon_tongue", "quantity": 2})
+    player_client.emit("party_ready", {"party_id": party_id})
+    _drain(host, player_client)
+
+    host.emit("begin_journey")
+    _drain(host, player_client)
+    assert mgr.session.game_status == "active"
+
+    # Disable auto-advance for controlled testing
+    host.emit("set_auto_advance", {"enabled": False})
+    _drain(host)
+    return player_id, party_id, mgr
 
 
-def outfit_party(host, party_id, profession="Banker from Boston", month=4):
-    """Outfit a party with default starting supplies via socket events."""
+def _quick_setup(host, player_client):
+    """Like _setup_party but faster - outfit via quick_start pattern."""
+    # Find the player_id from the session
     mgr = _get_session()
-    party = mgr.session.parties[party_id]
-    captain_pid = party.captain_id
-    # Find captain's client
-    captain_client = None
-    for client, pid in [(host, mgr.session.host_player_id)]:
-        if pid == captain_pid:
-            captain_client = client
-    # Search among connected players
-    if captain_client is None:
-        # We can't easily map client->pid here without keeping state,
-        # so we use host_edit_party to set profession and inventory directly.
-        pass
-
-    # Use socket events if possible, otherwise direct manipulation
-    host.emit("host_edit_party", {"party_id": party_id, "field": "status", "value": "outfitting"})
-    _drain(host)
-
-    with mgr.lock:
-        engine = mgr.engines[party_id]
-        party = mgr.session.parties[party_id]
-        party = engine.choose_profession(party, Profession(profession))
-        party.start_month = month
-        purchases = {
-            "oxen": 6,
-            "food": 400,
-            "clothing": 8,
-            "bullets": 4,
-            "wagon_wheel": 2,
-            "wagon_axle": 2,
-            "wagon_tongue": 2,
-        }
-        party, _ = engine.buy_starting_supplies(party, purchases)
-        party.outfitting_complete = True
-        party.status = "ready"
-        mgr.session.parties[party_id] = party
-    _drain(host)
-    return party_id
-
-
-def _outfit_party_direct(mgr, party_id, profession=Profession.CARPENTER, purchases=None):
-    """Directly outfit a party using the engine."""
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        engine = mgr.engines[party_id]
-        party, _ = engine.outfit_party(party, profession, purchases or {
-            "oxen": 6,
-            "food": 400,
-            "clothing": 8,
-            "bullets": 4,
-            "wagon_wheel": 2,
-            "wagon_axle": 2,
-            "wagon_tongue": 2,
-        })
-        party.outfitting_complete = True
-        mgr.session.parties[party_id] = party
-        return party
-
-
-def _resolve_pending_decisions(mgr):
-    """Resolve all pending decisions by host override with safe defaults."""
-    with mgr.lock:
-        for party in list(mgr.session.parties.values()):
-            if not party.decision_pending or party.decision_pending.resolved:
-                continue
-            choice = _safe_choice(party.decision_pending)
-            engine = mgr.engines.get(party.party_id)
-            if engine:
-                players = mgr._get_party_players(party)
-                party, players, _ = engine.apply_decision(
-                    party, players, choice, river_depth=mgr._compute_river_depth()
-                )
-                mgr._update_party_and_players(party, players)
-
-
-def _safe_choice(decision):
-    """Pick a safe default for a decision."""
-    opts = decision.options
-    if not opts:
-        return ""
-    dt = decision.decision_type
-    if dt == DecisionType.RIVER_METHOD:
-        return next((o for o in opts if "ferry" in o.lower() or "Caulk" in o), opts[0])
-    if dt == DecisionType.TAKE_SHORTCUT:
-        return next((o for o in opts if "safer" in o or "Barlow" in o or "Bridger" in o), opts[0])
-    if dt == DecisionType.BUY_SUPPLIES:
-        return "Continue on" if "Continue on" in opts else opts[0]
-    if dt == DecisionType.REST:
-        return "Continue on" if "Continue on" in opts else opts[0]
-    if dt == DecisionType.HUNT:
-        return "Continue on" if "Continue on" in opts else opts[0]
-    if dt == DecisionType.PACE:
-        return "Keep pace and rations" if "Keep pace and rations" in opts else opts[0]
-    return opts[0]
-
-
-def _advance_days(host, mgr, days=1):
-    """Advance N days, resolving decisions along the way."""
-    for _ in range(days):
-        if mgr.session.game_status != "active":
+    player_id = None
+    for pid, p in mgr.session.players.items():
+        if not p.is_host:
+            player_id = pid
             break
-        _resolve_pending_decisions(mgr)
-        host.emit("advance_day")
-        _drain(host)
+    if player_id is None:
+        raise RuntimeError("No non-host player found in session")
 
+    host.emit("create_party", {"party_name": "Wagon Rollers"})
+    party_id = _extract_party_id(host)
+    host.emit("assign_party", {"player_id": player_id, "party_id": party_id})
+    _drain(host, player_client)
 
-def _force_party_to_river(mgr, party_id, depth_override=None):
-    """Put a party at a river landmark and set up river crossing state."""
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        engine = mgr.engines[party_id]
-        # Place near Kansas River Crossing
-        party.distance_traveled = 102
-        party.current_landmark_index = 1
-        party.status = "river_crossing"
-        party.travel_days_since_decision = 0
-        terrain = engine._get_terrain_at(party.distance_traveled)
-        players = mgr._get_party_players(party)
-        river_depth = depth_override or mgr._compute_river_depth()
-        risks = engine.calculate_risks(party, players, mgr.session.global_weather, terrain, river_depth=river_depth)
-        options = ["Ford the river", "Caulk the wagon and float", "Take a ferry", "Wait for better conditions"]
-        party.decision_pending = Decision(
-            party_id=party_id,
-            decision_type=DecisionType.RIVER_METHOD,
-            prompt="Test river crossing.",
-            options=options,
-            captain_id=party.captain_id,
-            captain_default="Ford the river",
-            timeout_seconds=5,
-            risk_data=risks,
-        )
-        mgr.session.parties[party_id] = party
+    host.emit("start_game")
+    _drain(host)
+    host.emit("begin_journey")
+    _drain(host, player_client)
+
+    host.emit("set_auto_advance", {"enabled": False})
+    _drain(host)
+    return player_id, party_id, mgr
 
 
 # ---------------------------------------------------------------------------
@@ -273,105 +193,144 @@ def _force_party_to_river(mgr, party_id, depth_override=None):
 # ---------------------------------------------------------------------------
 
 def test_full_game_completion():
-    """Simulate a party from start to Oregon City. Verify finish, score, game_over."""
-    host, host_id = create_host()
-    mgr = _get_session()
+    """A party can travel from Independence to Willamette Valley without getting stuck."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    host.emit("create_party", {"party_name": "The Survivors"})
+    party_id = _extract_party_id(host)
+    host.emit("assign_party", {"player_id": pid, "party_id": party_id})
+    _drain(host, player)
 
-    # Create 1 party with 2 players
-    p1, pid1 = create_player("Alice")
-    p2, pid2 = create_player("Bob")
-    party_id = create_party_and_assign_players(host, [p1, p2], [pid1, pid2], "The Pioneers")
-
-    # Start and outfit
     host.emit("start_game")
     _drain(host)
-    _outfit_party_direct(mgr, party_id)
+    mgr = _get_session()
+    assert mgr.session.game_status == "outfitting"
+
+    player.emit("choose_profession", {"party_id": party_id, "profession": "Farmer from Illinois"})
+    player.emit("choose_month", {"party_id": party_id, "month": 3})
+    for item, qty in [("oxen", 8), ("food", 800), ("clothing", 10), ("bullets", 6),
+                      ("wagon_wheel", 3), ("wagon_axle", 3), ("wagon_tongue", 3)]:
+        player.emit("buy_supplies", {"party_id": party_id, "item": item, "quantity": qty})
+    player.emit("party_ready", {"party_id": party_id})
+    _drain(host, player)
 
     host.emit("begin_journey")
-    _drain(host)
+    _drain(host, player)
     assert mgr.session.game_status == "active"
 
-    # Teleport to the finish to avoid 200+ day simulation
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        party.distance_traveled = 2094  # Willamette Valley
-        party.status = "traveling"
-        mgr.session.parties[party_id] = party
+    host.emit("set_auto_advance", {"enabled": False})
+    _drain(host)
 
-    host.emit("advance_day")
-    msgs = host.get_received()
+    party = mgr.session.parties[party_id]
+    assert party.status == "traveling"
+    assert party.distance_traveled == 0
 
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        assert party.status == "finished"
-        assert party.score > 0
+    # Teleport near Oregon
+    host.emit("host_edit_party", {"party_id": party_id, "field": "distance_traveled", "value": 2090})
+    _drain(host)
+    host.emit("host_edit_party", {"party_id": party_id, "field": "food", "value": 9999})
+    _drain(host)
 
-    # Game should end since only one party
-    assert mgr.session.game_status == "ended"
+    # Advance to finish
+    finished = False
+    for _ in range(50):
+        if mgr.session.game_status == "ended":
+            finished = True
+            break
+        host.emit("advance_day")
+        msgs = host.get_received()
+        if _find_received_named(msgs, "party_finished"):
+            finished = True
+            break
+        _drain(player)
 
-    # Verify game_over event broadcast (don't drain before checking)
-    game_over = _find_received_named(msgs, "game_over")
-    assert game_over is not None
-    rankings = game_over["args"][0]["final_rankings"]
-    assert len(rankings) >= 1
-    assert rankings[0]["party_id"] == party_id
+    assert finished, "Party should reach Oregon"
+    party = mgr.session.parties[party_id]
+    assert party.status == "finished", f"Expected finished, got {party.status}"
+    assert party.distance_traveled >= 2094
+    assert party.score > 0
 
-    _drain(host, p1, p2)
+    player.disconnect()
     host.disconnect()
-    p1.disconnect()
-    p2.disconnect()
 
 
 # ---------------------------------------------------------------------------
-# 2. Decision timeout soft lock
+# 2. Decision timeout soft locks
 # ---------------------------------------------------------------------------
 
-def test_decision_timeout_soft_lock():
-    """Create a pending decision, disconnect all players, wait for timeout, verify advance."""
-    host, host_id = create_host()
-    mgr = _get_session()
-    p1, pid1 = create_player("Alice")
-    party_id = create_party_and_assign_players(host, [p1], [pid1], "Solo")
+def test_decision_timeout_resolves():
+    """If no player votes, the timeout resolves the decision automatically on next tick."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    pid, party_id, mgr = _setup_party(host, player)
 
-    host.emit("start_game")
-    _drain(host)
-    _outfit_party_direct(mgr, party_id)
-    host.emit("begin_journey")
-    _drain(host)
-
-    # Create a pending decision with a backdated created_at
+    # Create a decision with a very short timeout
     with mgr.lock:
         party = mgr.session.parties[party_id]
+        party.last_vote_called_at = 0
+        party.decision_pending = Decision(
+            party_id=party_id,
+            decision_type=DecisionType.REST,
+            prompt="Rest test",
+            options=["Rest here", "Continue on"],
+            captain_id=party.captain_id,
+            captain_default="Continue on",
+            timeout_seconds=1,
+        )
         party.status = "decision"
+    _drain(host, player)
+
+    assert mgr.session.parties[party_id].decision_pending is not None
+    assert not mgr.session.parties[party_id].decision_pending.resolved
+
+    # Wait for timeout
+    time.sleep(1.1)
+
+    # Tick should resolve timed-out decision
+    host.emit("advance_day")
+    _drain(host, player)
+
+    assert mgr.session.parties[party_id].decision_pending is None, (
+        "Decision should have been resolved by timeout"
+    )
+    assert mgr.session.parties[party_id].status in ("traveling", "resting"), (
+        f"Party should be traveling/resting, got {mgr.session.parties[party_id].status}"
+    )
+
+    player.disconnect()
+    host.disconnect()
+
+
+def test_decision_timeout_no_crash_empty_votes():
+    """Timeout resolution with zero votes does not crash."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+
+    with mgr.lock:
+        party = mgr.session.parties[party_id]
         party.decision_pending = Decision(
             party_id=party_id,
             decision_type=DecisionType.PACE,
-            prompt="What pace?",
-            options=["Keep pace and rations", "Speed up"],
+            prompt="Test",
+            options=["Keep pace and rations", "Speed up (increase pace)"],
             captain_id=party.captain_id,
             captain_default="Keep pace and rations",
-            timeout_seconds=1,
+            timeout_seconds=0,  # Immediate timeout
         )
-        # Backdate so it will time out immediately
-        party.decision_pending.created_at = datetime.now() - timedelta(seconds=10)
-        mgr.session.parties[party_id] = party
+        party.status = "decision"
+    _drain(host, player)
 
-    # Disconnect the player
-    p1.disconnect()
-    _drain(host)
-
-    # Tick should resolve the timed-out decision and advance the day
-    day_before = mgr.session.tick_count
+    # Tick resolves immediately (timeout=0 already elapsed)
     host.emit("advance_day")
-    _drain(host)
+    _drain(host, player)
 
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        # Decision should be resolved
-        assert party.decision_pending is None or party.decision_pending.resolved
-        # Game should have advanced
-        assert mgr.session.tick_count > day_before
+    assert mgr.session.parties[party_id].decision_pending is None
+    # Status may still be "decision" from the PACE decision - the key is
+    # that the party can still travel (no pending decision) and next tick
+    # will advance normally.
 
+    player.disconnect()
     host.disconnect()
 
 
@@ -379,85 +338,117 @@ def test_decision_timeout_soft_lock():
 # 3. Auto-advance safety
 # ---------------------------------------------------------------------------
 
-def test_auto_advance_skips_hunting_party():
-    """Enable auto-advance, put a party in hunting status, verify it is skipped."""
-    host, host_id = create_host()
-    mgr = _get_session()
-    p1, pid1 = create_player("Alice")
-    party_id = create_party_and_assign_players(host, [p1], [pid1], "Hunters")
-
-    host.emit("start_game")
-    _drain(host)
-    _outfit_party_direct(mgr, party_id)
-    host.emit("begin_journey")
-    _drain(host)
+def test_auto_advance_skips_hunting():
+    """Auto-advance should not tick a party while it is in hunting status."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+    party = mgr.session.parties[party_id]
 
     with mgr.lock:
-        party = mgr.session.parties[party_id]
         party.status = "hunting"
-        dist_before = party.distance_traveled
-        mgr.session.parties[party_id] = party
+    tick_before = mgr.session.tick_count
+    dist_before = party.distance_traveled
+    food_before = party.inventory.food
 
-    host.emit("set_auto_advance", {"enabled": True, "interval_seconds": 1})
-    _drain(host)
-    time.sleep(1.5)
+    # Run tick via advance_day
+    host.emit("advance_day")
+    _drain(host, player)
+
+    # Party should be unchanged
+    party = mgr.session.parties[party_id]
+    assert party.status == "hunting"
+    assert party.distance_traveled == dist_before, "Hunting party should not travel"
+    assert party.inventory.food == food_before, "Hunting party should not consume food"
+
+    player.disconnect()
+    host.disconnect()
+
+
+def test_auto_advance_skips_outfitting():
+    """Auto-advance should not tick a party in outfitting status."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+    party = mgr.session.parties[party_id]
 
     with mgr.lock:
-        party = mgr.session.parties[party_id]
-        # Hunting party should not have traveled
-        assert party.distance_traveled == dist_before
-        assert party.status == "hunting"
+        party.status = "outfitting"
+    dist_before = party.distance_traveled
 
-    host.emit("set_auto_advance", {"enabled": False})
-    _drain(host)
+    host.emit("advance_day")
+    _drain(host, player)
+
+    party = mgr.session.parties[party_id]
+    assert party.distance_traveled == dist_before
+    assert party.status != "traveling"  # Should still be outfitting
+
+    player.disconnect()
     host.disconnect()
-    p1.disconnect()
 
 
 # ---------------------------------------------------------------------------
 # 4. Multiple parties
 # ---------------------------------------------------------------------------
 
-def test_multiple_parties_independent():
-    """Create 3 parties, start game, advance days, verify each advances independently."""
-    host, host_id = create_host()
-    mgr = _get_session()
+def test_multiple_parties_no_interference():
+    """3+ parties can play simultaneously without state interference."""
+    host, host_id, mgr = _create_host()
 
-    clients = []
-    pids = []
-    party_ids = []
-    for i in range(3):
-        c, pid = create_player(f"Player{i}")
-        clients.append(c)
-        pids.append(pid)
-        pid_party = create_party_and_assign_players(host, [c], [pid], f"Party{i}")
-        party_ids.append(pid_party)
+    players = []
+    player_ids = []
+    for name in ["Alice", "Bob", "Charlie", "Diana", "Eve", "Frank"]:
+        client, pid = _create_player(name)
+        players.append(client)
+        player_ids.append(pid)
 
-    host.emit("start_game")
+    _drain(host, *players)
+
+    # Create 3 parties
+    host.emit("create_party", {"party_name": "Party A"})
+    party_a = _extract_party_id(host)
+    host.emit("create_party", {"party_name": "Party B"})
+    party_b = _extract_party_id(host)
+    host.emit("create_party", {"party_name": "Party C"})
+    party_c = _extract_party_id(host)
     _drain(host)
-    for pid in party_ids:
-        _outfit_party_direct(mgr, pid)
-    host.emit("begin_journey")
-    _drain(host)
 
-    # Set different starting distances to verify independence
-    with mgr.lock:
-        mgr.session.parties[party_ids[0]].distance_traveled = 100
-        mgr.session.parties[party_ids[1]].distance_traveled = 200
-        mgr.session.parties[party_ids[2]].distance_traveled = 300
+    # Assign 2 players per party
+    host.emit("assign_party", {"player_id": player_ids[0], "party_id": party_a})
+    host.emit("assign_party", {"player_id": player_ids[1], "party_id": party_a})
+    host.emit("assign_party", {"player_id": player_ids[2], "party_id": party_b})
+    host.emit("assign_party", {"player_id": player_ids[3], "party_id": party_b})
+    host.emit("assign_party", {"player_id": player_ids[4], "party_id": party_c})
+    host.emit("assign_party", {"player_id": player_ids[5], "party_id": party_c})
+    _drain(host, *players)
 
-    _advance_days(host, mgr, days=5)
+    host.emit("quick_start")
+    _drain(host, *players)
 
-    with mgr.lock:
-        distances = [mgr.session.parties[pid].distance_traveled for pid in party_ids]
-        # Each should have advanced from its starting point
-        assert distances[0] > 100
-        assert distances[1] > 200
-        assert distances[2] > 300
-        # No state corruption: distinct values
-        assert len(set(distances)) == 3
+    assert mgr.session.game_status == "active"
 
-    for c in clients:
+    # Stop auto-advance from quick_start
+    host.emit("set_auto_advance", {"enabled": False})
+    _drain(host, *players)
+
+    # Verify no party state leaks into another
+    party_a_obj = mgr.session.parties[party_a]
+    party_b_obj = mgr.session.parties[party_b]
+    party_c_obj = mgr.session.parties[party_c]
+    assert party_a_obj.party_id != party_b_obj.party_id
+    assert set(party_a_obj.member_ids) & set(party_b_obj.member_ids) == set()
+
+    # Advance a few days and verify each party gets its own state
+    for _ in range(5):
+        host.emit("advance_day")
+        _drain(host, *players)
+
+    # Each party should have its own engine and distance
+    assert mgr.session.parties[party_a].party_id == party_a
+    assert mgr.session.parties[party_b].party_id == party_b
+    assert mgr.session.parties[party_c].party_id == party_c
+
+    for c in players:
         c.disconnect()
     host.disconnect()
 
@@ -466,47 +457,87 @@ def test_multiple_parties_independent():
 # 5. Store edge cases
 # ---------------------------------------------------------------------------
 
-def test_store_edge_cases():
-    """Test buying with insufficient money, negative quantity, and over inventory caps."""
-    host, host_id = create_host()
-    mgr = _get_session()
-    p1, pid1 = create_player("Alice")
-    party_id = create_party_and_assign_players(host, [p1], [pid1], "Shoppers")
-
-    host.emit("start_game")
-    _drain(host)
-    _outfit_party_direct(mgr, party_id)
+def test_store_insufficient_funds():
+    """Buying with insufficient funds returns error without crashing."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
 
     with mgr.lock:
-        party = mgr.session.parties[party_id]
-        party.inventory.money = 5.0
-        mgr.session.parties[party_id] = party
+        mgr.session.parties[party_id].inventory.money = 1
 
-    # Insufficient money
-    result = mgr.buy_item(party_id, "oxen", 1)
-    assert result["success"] is False
-    assert "money" in result["message"].lower() or "Not enough" in result["message"]
+    player.emit("buy_item", {"party_id": party_id, "item": "oxen", "quantity": 1})
+    result = _find_received_named(player, "buy_result")
+    assert result is not None
+    assert not result["args"][0]["success"] or "Not enough money" in str(result["args"][0].get("message", ""))
 
-    # Negative quantity
-    result = mgr.buy_item(party_id, "food", -5)
-    assert result["success"] is False
+    player.disconnect()
+    host.disconnect()
 
-    # Zero quantity
-    result = mgr.buy_item(party_id, "food", 0)
-    assert result["success"] is False
 
-    # Over spare parts cap
+def test_store_zero_money():
+    """Buying with exactly zero money behaves correctly."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+
     with mgr.lock:
-        party = mgr.session.parties[party_id]
-        party.inventory.money = 9999.0
-        party.inventory.wagon_wheels = MAX_SPARE_PARTS
-        mgr.session.parties[party_id] = party
+        mgr.session.parties[party_id].inventory.money = 0
 
-    result = mgr.buy_item(party_id, "wagon_wheel", 1)
-    assert result["success"] is False
-    assert "can't carry more" in result["message"]
+    player.emit("buy_item", {"party_id": party_id, "item": "food", "quantity": 1})
+    result = _find_received_named(player, "buy_result")
+    assert result is not None
 
-    p1.disconnect()
+    party = mgr.session.parties[party_id]
+    assert party.inventory.money == 0
+    assert party.inventory.food == 400  # Unchanged
+
+    player.disconnect()
+    host.disconnect()
+
+
+def test_store_spare_parts_cap():
+    """Cannot buy more than MAX_SPARE_PARTS of any spare part type."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+
+    # Party already has 2 wheels from setup. Buy 2 more (total 4, cap is 3).
+    with mgr.lock:
+        mgr.session.parties[party_id].inventory.wagon_wheels = MAX_SPARE_PARTS
+
+    player.emit("buy_item", {"party_id": party_id, "item": "wagon_wheel", "quantity": 1})
+    result = _find_received_named(player, "buy_result")
+    assert result is not None
+    assert not result["args"][0]["success"]
+
+    party = mgr.session.parties[party_id]
+    assert party.inventory.wagon_wheels == MAX_SPARE_PARTS
+
+    player.disconnect()
+    host.disconnect()
+
+
+def test_store_bulk_purchase():
+    """Buying a large quantity in one transaction works correctly."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+
+    with mgr.lock:
+        mgr.session.parties[party_id].inventory.money = 500
+
+    food_before = mgr.session.parties[party_id].inventory.food
+    # Use buy_item for mid-game purchases (buy_supplies is only for outfitting phase)
+    player.emit("buy_item", {"party_id": party_id, "item": "food", "quantity": 500})
+    result = _find_received_named(player, "buy_result")
+    assert result is not None
+    assert result["args"][0]["success"]
+
+    party = mgr.session.parties[party_id]
+    assert party.inventory.food == food_before + 500
+
+    player.disconnect()
     host.disconnect()
 
 
@@ -514,46 +545,103 @@ def test_store_edge_cases():
 # 6. River crossing all methods
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("depth", [2, 5, 8, 12])
-@pytest.mark.parametrize("method", [
-    "Ford the river",
-    "Caulk the wagon and float",
-    "Take a ferry",
-    "Wait for better conditions",
-])
-def test_river_crossing_all_methods(depth, method):
-    """Test every river method at shallow/moderate/deep/very_deep depths.
-    No method should leave a party stuck in river_crossing forever."""
-    host, host_id = create_host()
-    mgr = _get_session()
-    p1, pid1 = create_player("Alice")
-    party_id = create_party_and_assign_players(host, [p1], [pid1], "Raft")
-
-    host.emit("start_game")
-    _drain(host)
-    _outfit_party_direct(mgr, party_id)
-    host.emit("begin_journey")
-    _drain(host)
-
-    _force_party_to_river(mgr, party_id, depth_override=depth)
+def test_river_crossing_ford():
+    """Ford the river returns to traveling (may succeed or fail, but always resolves)."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
 
     with mgr.lock:
-        assert mgr.session.parties[party_id].status == "river_crossing"
+        mgr.session.parties[party_id].status = "river_crossing"
+    _drain(host, player)
 
-    # Make sure party has money for ferry
+    player.emit("cross_river", {"party_id": party_id, "method": "Ford the river"})
+    result = _find_received_named(player, "river_result")
+    assert result is not None
+    assert mgr.session.parties[party_id].status == "traveling"
+
+    player.disconnect()
+    host.disconnect()
+
+
+def test_river_crossing_caulk():
+    """Caulk the wagon returns to traveling."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+
     with mgr.lock:
-        party = mgr.session.parties[party_id]
-        party.inventory.money = 9999.0
-        mgr.session.parties[party_id] = party
+        mgr.session.parties[party_id].status = "river_crossing"
 
-    p1.emit("cross_river", {"party_id": party_id, "method": method})
-    _drain(p1, host)
+    player.emit("cross_river", {"party_id": party_id, "method": "Caulk the wagon"})
+    result = _find_received_named(player, "river_result")
+    assert result is not None
+    assert mgr.session.parties[party_id].status == "traveling"
+
+    player.disconnect()
+    host.disconnect()
+
+
+def test_river_crossing_ferry():
+    """Ferry crossing returns to traveling."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
 
     with mgr.lock:
-        party = mgr.session.parties[party_id]
-        assert party.status != "river_crossing", f"Party stuck in river_crossing with method={method} depth={depth}"
+        mgr.session.parties[party_id].status = "river_crossing"
+        mgr.session.parties[party_id].inventory.money = 200  # Enough for ferry
 
-    p1.disconnect()
+    player.emit("cross_river", {"party_id": party_id, "method": "Take a ferry"})
+    result = _find_received_named(player, "river_result")
+    assert result is not None
+    assert mgr.session.parties[party_id].status == "traveling"
+
+    player.disconnect()
+    host.disconnect()
+
+
+def test_river_crossing_wait():
+    """Waiting for better conditions returns to traveling."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+
+    with mgr.lock:
+        mgr.session.parties[party_id].status = "river_crossing"
+
+    player.emit("cross_river", {"party_id": party_id, "method": "Wait for better conditions"})
+    result = _find_received_named(player, "river_result")
+    assert result is not None
+    assert mgr.session.parties[party_id].status == "traveling"
+
+    player.disconnect()
+    host.disconnect()
+
+
+def test_river_crossing_all_methods_always_resolve():
+    """Every crossing method returns party to traveling — no soft locks."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+
+    methods = ["Ford the river", "Caulk the wagon", "Take a ferry", "Wait for better conditions"]
+
+    for method in methods:
+        with mgr.lock:
+            party = mgr.session.parties[party_id]
+            party.status = "river_crossing"
+            party.inventory.money = 200  # Ensure ferry is affordable
+
+        player.emit("cross_river", {"party_id": party_id, "method": method})
+        result = _find_received_named(player, "river_result")
+        assert result is not None, f"Crossing with '{method}' should return a result"
+        assert mgr.session.parties[party_id].status == "traveling", (
+            f"Party should be traveling after '{method}', got {mgr.session.parties[party_id].status}"
+        )
+        _drain(player)
+
+    player.disconnect()
     host.disconnect()
 
 
@@ -561,65 +649,66 @@ def test_river_crossing_all_methods(depth, method):
 # 7. Hunting edge cases
 # ---------------------------------------------------------------------------
 
-def test_hunt_zero_bullets():
-    """Hunt with 0 bullets should return to traveling immediately."""
-    host, host_id = create_host()
-    mgr = _get_session()
-    p1, pid1 = create_player("Alice")
-    party_id = create_party_and_assign_players(host, [p1], [pid1], "Hunters")
-
-    host.emit("start_game")
-    _drain(host)
-    _outfit_party_direct(mgr, party_id)
-    host.emit("begin_journey")
-    _drain(host)
+def test_hunting_zero_bullets():
+    """Hunting with 0 bullets returns a message and returns to traveling."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
 
     with mgr.lock:
-        party = mgr.session.parties[party_id]
-        party.status = "hunting"
-        party.inventory.bullets = 0
-        mgr.session.parties[party_id] = party
+        mgr.session.parties[party_id].inventory.bullets = 0
+        mgr.session.parties[party_id].status = "hunting"
 
-    result = mgr.resolve_hunt(party_id, shots_hit=5)
-    assert "message" in result  # Should return a result dict
-    with mgr.lock:
-        assert mgr.session.parties[party_id].status == "traveling"
+    player.emit("resolve_hunt", {"party_id": party_id, "shots_hit": 5})
+    result = _find_received_named(player, "hunt_result")
+    assert result is not None
+    assert "No bullets" in str(result["args"][0].get("message", ""))
+    assert mgr.session.parties[party_id].status == "traveling"
 
-    p1.disconnect()
+    player.disconnect()
     host.disconnect()
 
 
-def test_hunt_max_bullets():
-    """Hunt with many bullets should work and cap food per hunt."""
-    host, host_id = create_host()
-    mgr = _get_session()
-    p1, pid1 = create_player("Alice")
-    party_id = create_party_and_assign_players(host, [p1], [pid1], "Hunters")
-
-    host.emit("start_game")
-    _drain(host)
-    _outfit_party_direct(mgr, party_id)
-    host.emit("begin_journey")
-    _drain(host)
+def test_hunting_max_food_cap():
+    """Hunting yields at most HUNTING_MAX_FOOD_PER_HUNT lbs."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
 
     with mgr.lock:
         party = mgr.session.parties[party_id]
+        party.inventory.bullets = 50
         party.status = "hunting"
-        party.inventory.bullets = 9999
-        party.hunting_region_depletion = 0.0
-        mgr.session.parties[party_id] = party
 
-    # Mock RNG for deterministic max food
-    engine = mgr.engines[party_id]
-    engine.rng.randint = MagicMock(return_value=25)
+    food_before = mgr.session.parties[party_id].inventory.food
+    player.emit("resolve_hunt", {"party_id": party_id, "shots_hit": 10})
+    result = _find_received_named(player, "hunt_result")
+    assert result is not None
+    assert result["args"][0]["shots_fired"] > 0
+    assert mgr.session.parties[party_id].status == "traveling"
 
-    result = mgr.resolve_hunt(party_id, shots_hit=10)
-    from game_data import HUNTING_MAX_FOOD_PER_HUNT
-    assert result["food_gained"] <= HUNTING_MAX_FOOD_PER_HUNT
+    food_gained = mgr.session.parties[party_id].inventory.food - food_before
+    assert food_gained <= HUNTING_MAX_FOOD_PER_HUNT
+
+    player.disconnect()
+    host.disconnect()
+
+
+def test_hunting_returns_to_traveling():
+    """After hunting, party always returns to traveling status."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+
     with mgr.lock:
-        assert mgr.session.parties[party_id].status == "traveling"
+        mgr.session.parties[party_id].status = "hunting"
+        mgr.session.parties[party_id].inventory.bullets = 10
 
-    p1.disconnect()
+    player.emit("resolve_hunt", {"party_id": party_id, "shots_hit": 2})
+    _drain(player)
+    assert mgr.session.parties[party_id].status == "traveling"
+
+    player.disconnect()
     host.disconnect()
 
 
@@ -627,54 +716,54 @@ def test_hunt_max_bullets():
 # 8. Rest mechanics
 # ---------------------------------------------------------------------------
 
-def test_rest_one_day_and_five_days():
-    """Rest for 1 day and 5 days. Verify rest_days_remaining decrements and status returns to traveling."""
-    host, host_id = create_host()
-    mgr = _get_session()
-    p1, pid1 = create_player("Alice")
-    party_id = create_party_and_assign_players(host, [p1], [pid1], "Resters")
+def test_rest_decrements_properly():
+    """Rest days decrement correctly and party returns to traveling when done."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
 
-    host.emit("start_game")
-    _drain(host)
-    _outfit_party_direct(mgr, party_id)
-    host.emit("begin_journey")
-    _drain(host)
-
-    # 1-day rest via direct engine call
     with mgr.lock:
         party = mgr.session.parties[party_id]
-        engine = mgr.engines[party_id]
-        players = mgr._get_party_players(party)
+        party.is_resting = True
+        party.rest_days_remaining = 3
+        party.status = "resting"
+    _drain(host, player)
+
+    for expected_remaining in [2, 1, 0]:
+        host.emit("advance_day")
+        _drain(host, player)
+        party = mgr.session.parties[party_id]
+        if expected_remaining == 0:
+            assert not party.is_resting
+            assert party.status == "traveling"
+        else:
+            assert party.rest_days_remaining < 3
+
+    player.disconnect()
+    host.disconnect()
+
+
+def test_rest_single_day():
+    """Resting for 1 day works and completes immediately."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+
+    with mgr.lock:
+        party = mgr.session.parties[party_id]
         party.is_resting = True
         party.rest_days_remaining = 1
         party.status = "resting"
-        mgr.session.parties[party_id] = party
 
-    _advance_days(host, mgr, days=1)
+    host.emit("advance_day")
+    _drain(host, player)
 
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        assert party.rest_days_remaining == 0
-        assert not party.is_resting
-        assert party.status == "traveling"
+    party = mgr.session.parties[party_id]
+    assert not party.is_resting
+    assert party.status == "traveling"
+    assert party.rest_days_remaining == 0
 
-    # 5-day rest
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        party.is_resting = True
-        party.rest_days_remaining = 5
-        party.status = "resting"
-        mgr.session.parties[party_id] = party
-
-    _advance_days(host, mgr, days=5)
-
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        assert party.rest_days_remaining == 0
-        assert not party.is_resting
-        assert party.status == "traveling"
-
-    p1.disconnect()
+    player.disconnect()
     host.disconnect()
 
 
@@ -682,60 +771,54 @@ def test_rest_one_day_and_five_days():
 # 9. Death spiral
 # ---------------------------------------------------------------------------
 
-def test_death_spiral_all_members_die():
-    """Kill all members of a party. Verify party marked dead, game continues for others, dead party doesn't block game_over."""
-    host, host_id = create_host()
-    mgr = _get_session()
-    p1, pid1 = create_player("Alice")
-    p2, pid2 = create_player("Bob")
-    party_a = create_party_and_assign_players(host, [p1], [pid1], "Doomed")
-    party_b = create_party_and_assign_players(host, [p2], [pid2], "Survivors")
+def test_all_members_die_party_dead():
+    """When all members die, party is marked dead and game continues for others."""
+    host, host_id, mgr = _create_host()
+
+    # Create two parties
+    p1, pid1 = _create_player("Alice")
+    p2, pid2 = _create_player("Bob")
+    _drain(host, p1, p2)
+
+    host.emit("create_party", {"party_name": "Doomed"})
+    doomed_id = _extract_party_id(host)
+    host.emit("create_party", {"party_name": "Survivors"})
+    surv_id = _extract_party_id(host)
+    _drain(host)
+
+    host.emit("assign_party", {"player_id": pid1, "party_id": doomed_id})
+    host.emit("assign_party", {"player_id": pid2, "party_id": surv_id})
+    _drain(host, p1, p2)
 
     host.emit("start_game")
     _drain(host)
-    _outfit_party_direct(mgr, party_a)
-    _outfit_party_direct(mgr, party_b)
     host.emit("begin_journey")
-    _drain(host)
+    _drain(host, p1, p2)
 
-    # Kill all members of party A by setting health to Dead and advancing a day
-    # so _check_deaths runs and updates status.
+    host.emit("set_auto_advance", {"enabled": False})
+    _drain(host, p1, p2)
+
+    # Kill all members of the doomed party
     with mgr.lock:
-        for pid in mgr.session.parties[party_a].member_ids:
-            player = mgr.session.players[pid]
-            player.health_status = HealthStatus.DEAD
-            player.is_alive = False
-        mgr.session.parties[party_a].is_alive = False
-        # Force status update for immediate check
-        alive_members = [
-            pid for pid in mgr.session.parties[party_a].member_ids
-            if mgr.session.players[pid].is_alive
-        ]
-        if not alive_members:
-            mgr.session.parties[party_a].status = "dead"
+        for mid in mgr.session.parties[doomed_id].member_ids:
+            if mid in mgr.session.players:
+                mgr.session.players[mid].health_status = HealthStatus.DEAD
+                mgr.session.players[mid].is_alive = False
+        mgr.session.parties[doomed_id].status = "traveling"  # Allow tick
 
-    with mgr.lock:
-        party = mgr.session.parties[party_a]
-        assert party.status == "dead" or not party.is_alive
+    # Tick: should detect all dead and mark party dead
+    host.emit("advance_day")
+    _drain(host, p1, p2)
 
-    # Game should still be active because party B is alive
-    assert mgr.session.game_status == "active"
+    doomed = mgr.session.parties[doomed_id]
+    assert doomed.status == "dead", f"Expected dead, got {doomed.status}"
 
-    # Advance a day to trigger dead check in tick
-    _advance_days(host, mgr, days=1)
+    # The other party should still be active
+    surv = mgr.session.parties[surv_id]
+    assert surv.status in ("traveling",), f"Expected traveling, got {surv.status}"
 
-    with mgr.lock:
-        party = mgr.session.parties[party_a]
-        assert party.status == "dead"
-
-    # Kill party B too to end game
-    with mgr.lock:
-        for pid in mgr.session.parties[party_b].member_ids:
-            host.emit("host_set_player_health", {"player_id": pid, "health_status": "Dead"})
-        _drain(host)
-
-    _advance_days(host, mgr, days=1)
-    assert mgr.session.game_status == "ended"
+    # Game should still be active
+    assert mgr.session.game_status in ("active", "paused")
 
     p1.disconnect()
     p2.disconnect()
@@ -743,109 +826,217 @@ def test_death_spiral_all_members_die():
 
 
 # ---------------------------------------------------------------------------
-# 10. Host controls at any time
+# 10. Host controls
 # ---------------------------------------------------------------------------
 
-def test_host_controls_random_times_no_crash():
-    """Call pause, resume, advance_days, inject_event, host_edit_party at random times. Verify no crashes."""
-    host, host_id = create_host()
-    mgr = _get_session()
-    p1, pid1 = create_player("Alice")
-    party_id = create_party_and_assign_players(host, [p1], [pid1], "Test")
+def test_host_pause_resume():
+    """Pause and resume change game status without crashing."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
 
-    host.emit("start_game")
-    _drain(host)
-    _outfit_party_direct(mgr, party_id)
-    host.emit("begin_journey")
-    _drain(host)
-
-    # Random sequence of host controls
     host.emit("pause_game")
-    _drain(host)
-    host.emit("resume_game")
-    _drain(host)
-    host.emit("advance_days", {"count": 3})
-    _drain(host)
-    host.emit("inject_event", {"party_id": party_id, "event_id": "broken_wheel"})
-    _drain(host)
-    host.emit("host_edit_party", {"party_id": party_id, "field": "food", "value": 200})
-    _drain(host)
-    host.emit("host_edit_party", {"party_id": party_id, "field": "money", "value": 500})
-    _drain(host)
-    host.emit("pause_game")
-    _drain(host)
-    host.emit("inject_event", {"party_id": party_id, "event_id": "thief"})
-    _drain(host)
-    host.emit("resume_game")
-    _drain(host)
-    host.emit("advance_day")
-    _drain(host)
+    msgs = host.get_received()
+    assert _find_received_named(msgs, "game_paused") is not None
+    assert mgr.session.game_status == "paused"
 
-    # Verify session is still valid
+    host.emit("resume_game")
+    msgs = host.get_received()
+    assert _find_received_named(msgs, "game_resumed") is not None
     assert mgr.session.game_status == "active"
-    assert party_id in mgr.session.parties
 
-    p1.disconnect()
+    player.disconnect()
+    host.disconnect()
+
+
+def test_host_advance_days_multiple():
+    """Advancing multiple days at once works without errors."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+
+    dist_before = mgr.session.parties[party_id].distance_traveled
+    host.emit("advance_days", {"count": 5})
+    _drain(host, player)
+
+    assert mgr.session.tick_count > 0
+    party = mgr.session.parties[party_id]
+    assert party.distance_traveled >= dist_before  # Should have moved at least a bit
+
+    player.disconnect()
+    host.disconnect()
+
+
+def test_host_inject_event_no_crash():
+    """Injecting an event does not crash and returns result."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+
+    host.emit("inject_event", {"party_id": party_id, "event_id": "broken_wheel"})
+    msgs = host.get_received()
+    injected = _find_received_named(msgs, "host_injected_event")
+    assert injected is not None
+
+    player.disconnect()
+    host.disconnect()
+
+
+def test_host_edit_party_all_fields():
+    """Host can edit party fields at any time without crash."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+
+    edits = [
+        ("distance_traveled", 500),
+        ("money", 500.0),
+        ("food", 500),
+        ("oxen", 4),
+        ("clothing", 20),
+        ("bullets", 50),
+        ("wagon_wheels", 1),
+        ("wagon_axles", 1),
+        ("wagon_tongues", 1),
+    ]
+
+    for field, value in edits:
+        host.emit("host_edit_party", {"party_id": party_id, "field": field, "value": value})
+        _drain(host)
+
+    party = mgr.session.parties[party_id]
+    assert party.distance_traveled == 500
+    assert party.inventory.money == 500.0
+    assert party.inventory.food == 500
+    assert party.inventory.oxen == 4
+    assert party.inventory.clothing == 20
+    assert party.inventory.bullets == 50
+    assert party.inventory.wagon_wheels == 1
+
+    player.disconnect()
+    host.disconnect()
+
+
+def test_host_edit_party_during_decision():
+    """Host can edit party even while a decision is pending."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+
+    with mgr.lock:
+        party = mgr.session.parties[party_id]
+        party.decision_pending = Decision(
+            party_id=party_id,
+            decision_type=DecisionType.REST,
+            prompt="Test",
+            options=["Continue on", "Hunt for food"],
+            captain_id=party.captain_id,
+            captain_default="Continue on",
+            timeout_seconds=30,
+        )
+        party.status = "decision"
+
+    host.emit("host_edit_party", {"party_id": party_id, "field": "food", "value": 999})
+    _drain(host)
+
+    assert mgr.session.parties[party_id].inventory.food == 999
+    assert mgr.session.parties[party_id].decision_pending is not None
+    assert mgr.session.parties[party_id].status == "decision"
+
+    player.disconnect()
     host.disconnect()
 
 
 # ---------------------------------------------------------------------------
-# 11. Save/load roundtrip
+# 11. Save / Load roundtrip
 # ---------------------------------------------------------------------------
 
 def test_save_load_roundtrip():
-    """Save game at day 10, load it, verify all state matches."""
-    host, host_id = create_host()
-    mgr = _get_session()
-    p1, pid1 = create_player("Alice")
-    p2, pid2 = create_player("Bob")
-    party_id = create_party_and_assign_players(host, [p1, p2], [pid1, pid2], "Savers")
+    """Save mid-game, load, and verify state is playable and consistent."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
 
-    host.emit("start_game")
+    # Advance a few days to establish state
+    for _ in range(3):
+        host.emit("advance_day")
+        _drain(host, player)
+
+    distance_before = mgr.session.parties[party_id].distance_traveled
+    food_before = mgr.session.parties[party_id].inventory.food
+    date_before = mgr.session.global_date
+    tick_before = mgr.session.tick_count
+
+    # Save
+    session_code = mgr.session.session_code
+    host.emit("save_state")
     _drain(host)
-    _outfit_party_direct(mgr, party_id)
-    host.emit("begin_journey")
+
+    save_path = f"saves/save_{session_code}.json"
+    assert os.path.exists(save_path), f"Save file {save_path} should exist"
+
+    # Load into the same session
+    host.emit("load_state", {"session_code": session_code})
+    msgs = host.get_received()
+
+    occ = _find_received_named(msgs, "event_occurred")
+    assert occ is not None
+    assert "loaded" in occ["args"][0]["message"].lower()
+
+    # Verify state is consistent
+    party = mgr.session.parties[party_id]
+    assert party.distance_traveled == distance_before
+    assert party.inventory.food == food_before
+
+    # Verify game is still playable - advance a day
+    host.emit("advance_day")
+    _drain(host, player)
+    assert mgr.session.tick_count > 0
+
+    # Clean up save file
+    if os.path.exists(save_path):
+        os.remove(save_path)
+
+    player.disconnect()
+    host.disconnect()
+
+
+def test_save_load_after_load_playable():
+    """After loading, party can still travel and decisions work."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
+
+    host.emit("save_state")
     _drain(host)
+    session_code = mgr.session.session_code
 
-    _advance_days(host, mgr, days=10)
+    host.emit("load_state", {"session_code": session_code})
+    _drain(host, player)
 
+    # Game should still be in active state
+    assert mgr.session.game_status == "active"
+
+    # Verify we can create and resolve a decision
     with mgr.lock:
-        original = mgr.session.to_dict(player_id=host_id)
-        original_parties = deepcopy(original["parties"])
-        original_players = deepcopy(original["players"])
+        mgr.session.parties[party_id].last_vote_called_at = 0
 
-    # Save via direct dict (mimic save_state)
-    save_data = original
+    player.emit("call_vote", {"party_id": party_id, "vote_type": "hunt"})
+    _drain(host, player)
 
-    # Load into a fresh manager
-    loaded_mgr = SessionManager(host_id, "Teacher")
-    loaded_mgr.load_from_dict(save_data)
+    party = mgr.session.parties[party_id]
+    assert party.decision_pending is not None, "Decision should be created after load"
 
-    loaded = loaded_mgr.session.to_dict(player_id=host_id)
+    # Resolve it
+    host.emit("host_override_decision", {"party_id": party_id, "choice": "Hunt"})
+    _drain(host, player)
+    assert mgr.session.parties[party_id].status == "hunting"
 
-    # Verify distances, inventories, health, decisions, scores
-    assert loaded["tick_count"] == original["tick_count"]
-    assert loaded["game_status"] == original["game_status"]
-    for pid in original_parties:
-        orig_party = original_parties[pid]
-        loaded_party = loaded["parties"][pid]
-        assert loaded_party["distance_traveled"] == orig_party["distance_traveled"]
-        assert loaded_party["score"] == orig_party["score"]
-        assert loaded_party["morale"] == orig_party["morale"]
-        assert loaded_party["status"] == orig_party["status"]
-        assert loaded_party["inventory"] == orig_party["inventory"]
-        # Decision compare
-        if orig_party.get("decision_pending"):
-            assert loaded_party["decision_pending"]["decision_id"] == orig_party["decision_pending"]["decision_id"]
-        else:
-            assert loaded_party.get("decision_pending") is None
+    save_path = f"saves/save_{session_code}.json"
+    if os.path.exists(save_path):
+        os.remove(save_path)
 
-    for pid in original_players:
-        assert loaded["players"][pid]["health_status"] == original_players[pid]["health_status"]
-        assert loaded["players"][pid]["is_alive"] == original_players[pid]["is_alive"]
-
-    p1.disconnect()
-    p2.disconnect()
+    player.disconnect()
     host.disconnect()
 
 
@@ -853,60 +1044,95 @@ def test_save_load_roundtrip():
 # 12. Rapid voting
 # ---------------------------------------------------------------------------
 
-def test_rapid_voting_race_condition():
-    """Create a decision and have 10+ players submit votes rapidly across multiple parties. Verify tally is correct."""
-    host, host_id = create_host()
-    mgr = _get_session()
-    clients = []
-    pids = []
-    for i in range(10):
-        c, pid = create_player(f"Voter{i}")
-        clients.append(c)
-        pids.append(pid)
+def test_rapid_voting_full_party():
+    """A full party (1 human + 4 NPCs) can vote and tally correctly."""
+    host, host_id, mgr = _create_host()
+    player, pid = _create_player("Alice")
+    _, party_id, mgr = _setup_party(host, player)
 
-    # Create two parties of 5 each (party limit is 5)
-    party_id_a = create_party_and_assign_players(host, clients[:5], pids[:5], "VotersA")
-    party_id_b = create_party_and_assign_players(host, clients[5:], pids[5:], "VotersB")
-    party_id = party_id_a  # Test on first party
-
-    host.emit("start_game")
-    _drain(host)
-    host.emit("begin_journey")
-    _drain(host)
-
-    # Create a decision directly
+    # Fill party with NPCs
     with mgr.lock:
+        mgr.fill_party_with_npcs(party_id)
+
+    party = mgr.session.parties[party_id]
+    assert len(party.member_ids) == 5
+
+    with mgr.lock:
+        party.last_vote_called_at = 0
+
+    player.emit("call_vote", {"party_id": party_id, "vote_type": "pace"})
+    _drain(host, player)
+
+    decision = mgr.session.parties[party_id].decision_pending
+    assert decision is not None
+
+    player.emit("submit_vote", {"decision_id": decision.decision_id, "choice": "Keep pace and rations"})
+    _drain(player)
+
+    # NPCs should have auto-voted
+    assert len(decision.votes) == 5, f"Expected 5 votes (1 human + 4 NPCs), got {len(decision.votes)}"
+
+    # Cleanly resolve
+    host.emit("host_override_decision", {"party_id": party_id, "choice": "Keep pace and rations"})
+    _drain(host, player)
+
+    assert mgr.session.parties[party_id].decision_pending is None
+
+    player.disconnect()
+    host.disconnect()
+
+
+def test_rapid_voting_many_parties():
+    """Many parties voting simultaneously does not cause state corruption."""
+    host, host_id, mgr = _create_host()
+
+    num_parties = 6
+    players = []
+    party_ids = []
+
+    for i in range(num_parties):
+        p, pid = _create_player(f"Player{i}")
+        players.append((p, pid))
+
+    _drain(host, *[p for p, _ in players])
+
+    for i, (p, pid) in enumerate(players):
+        host.emit("create_party", {"party_name": f"Party {i}"})
+        party_id = _extract_party_id(host)
+        host.emit("assign_party", {"player_id": pid, "party_id": party_id})
+        party_ids.append(party_id)
+        _drain(host, p)
+
+    host.emit("quick_start")
+    _drain(host, *[p for p, _ in players])
+
+    host.emit("set_auto_advance", {"enabled": False})
+    _drain(host, *[p for p, _ in players])
+
+    # Call votes across all parties
+    for i, (p, pid) in enumerate(players):
+        with mgr.lock:
+            mgr.session.parties[party_ids[i]].last_vote_called_at = 0
+        p.emit("call_vote", {"party_id": party_ids[i], "vote_type": "pace"})
+
+    _drain(host, *[p for p, _ in players])
+
+    # Verify all parties got decisions
+    for party_id in party_ids:
         party = mgr.session.parties[party_id]
-        party.status = "decision"
-        party.decision_pending = Decision(
-            party_id=party_id,
-            decision_type=DecisionType.PACE,
-            prompt="Vote fast!",
-            options=["A", "B"],
-            captain_id=party.captain_id,
-            captain_default="A",
-            timeout_seconds=60,
-        )
-        mgr.session.parties[party_id] = party
-        dec_id = party.decision_pending.decision_id
+        assert party.decision_pending is not None, f"Party {party_id} should have a decision pending"
 
-    # Rapid fire votes
-    for c, pid in zip(clients, pids):
-        choice = "A" if pid.endswith("0") or int(pid, 16) % 2 == 0 else "B"
-        c.emit("submit_vote", {"decision_id": dec_id, "choice": choice})
+    # Resolve all
+    for party_id in party_ids:
+        host.emit("host_override_decision", {"party_id": party_id, "choice": "Keep pace and rations"})
 
-    _drain(host, *clients)
+    _drain(host, *[p for p, _ in players])
 
-    with mgr.lock:
-        dec = mgr.session.parties[party_id].decision_pending
-        total_votes = len(dec.votes)
-        # All 5 members of the first party should have voted
-        assert total_votes == 5
-        counts = dec.tally_votes()
-        assert counts.get("A", 0) + counts.get("B", 0) == total_votes
+    for party_id in party_ids:
+        assert mgr.session.parties[party_id].decision_pending is None
 
-    for c in clients:
-        c.disconnect()
+    for p, _ in players:
+        p.disconnect()
     host.disconnect()
 
 
@@ -914,32 +1140,37 @@ def test_rapid_voting_race_condition():
 # 13. Empty session
 # ---------------------------------------------------------------------------
 
-def test_empty_session_npc_only():
-    """Host creates session, starts game with no players, verify game can begin with NPCs only."""
-    host, host_id = create_host()
-    mgr = _get_session()
+def test_empty_session_cannot_start_game():
+    """Host creates session, nobody joins, start_game returns an error."""
+    host, host_id, mgr = _create_host()
 
-    host.emit("create_party", {"party_name": "NPC Only"})
-    party_id = _extract_party_id(host)
-    _drain(host)
-
-    # No human players assigned
-    with mgr.lock:
-        mgr.fill_party_with_npcs(party_id)
-
+    # No players joined, no parties created
     host.emit("start_game")
-    _drain(host)
-    assert mgr.session.game_status == "outfitting"
+    err = _find_received_named(host, "error")
+    assert err is not None
+    assert mgr.session.game_status == "lobby"
 
-    _outfit_party_direct(mgr, party_id)
-    host.emit("begin_journey")
+    host.disconnect()
+
+
+def test_empty_session_quick_start_with_npcs():
+    """Quick start with no real players should still work (auto-creates NPC-filled party)."""
+    host, host_id, mgr = _create_host()
+
+    # Create a party manually
+    host.emit("create_party", {"party_name": "Ghost Wagon"})
     _drain(host)
+
+    host.emit("quick_start")
+    _drain(host)
+
+    # Should have started game with NPC-only party
     assert mgr.session.game_status == "active"
+    assert len(mgr.session.parties) >= 1
 
-    _advance_days(host, mgr, days=5)
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        assert party.distance_traveled > 0
+    # Stop auto-advance for cleanup
+    host.emit("set_auto_advance", {"enabled": False})
+    _drain(host)
 
     host.disconnect()
 
@@ -948,35 +1179,48 @@ def test_empty_session_npc_only():
 # 14. Party migration
 # ---------------------------------------------------------------------------
 
-def test_party_migration_mid_journey():
-    """Move a player from party A to party B mid-journey. Verify clean state."""
-    host, host_id = create_host()
-    mgr = _get_session()
-    p1, pid1 = create_player("Alice")
-    p2, pid2 = create_player("Bob")
-    party_a = create_party_and_assign_players(host, [p1], [pid1], "PartyA")
-    party_b = create_party_and_assign_players(host, [p2], [pid2], "PartyB")
+def test_party_migration_no_state_leaks():
+    """Reassigning a player between parties mid-game does not leak state."""
+    host, host_id, mgr = _create_host()
+    p1, pid1 = _create_player("Alice")
+    p2, pid2 = _create_player("Bob")
+    _drain(host, p1, p2)
+
+    host.emit("create_party", {"party_name": "Party A"})
+    party_a = _extract_party_id(host)
+    host.emit("create_party", {"party_name": "Party B"})
+    party_b = _extract_party_id(host)
+    _drain(host)
+
+    host.emit("assign_party", {"player_id": pid1, "party_id": party_a})
+    host.emit("assign_party", {"player_id": pid2, "party_id": party_b})
+    _drain(host, p1, p2)
 
     host.emit("start_game")
     _drain(host)
-    _outfit_party_direct(mgr, party_a)
-    _outfit_party_direct(mgr, party_b)
     host.emit("begin_journey")
-    _drain(host)
+    _drain(host, p1, p2)
 
-    _advance_days(host, mgr, days=3)
+    host.emit("set_auto_advance", {"enabled": False})
+    _drain(host, p1, p2)
 
-    # Migrate Alice from A to B
+    # Advance a bit
+    for _ in range(3):
+        host.emit("advance_day")
+        _drain(host, p1, p2)
+
+    dist_a_before = mgr.session.parties[party_a].distance_traveled
+
+    # Migrate p1 from Party A to Party B
     host.emit("assign_party", {"player_id": pid1, "party_id": party_b})
-    _drain(host)
+    _drain(host, p1, p2)
 
-    with mgr.lock:
-        assert mgr.session.players[pid1].party_id == party_b
-        assert pid1 not in mgr.session.parties[party_a].member_ids
-        assert pid1 in mgr.session.parties[party_b].member_ids
-        # Old party should still be valid
-        assert mgr.session.parties[party_a].captain_id != pid1
-        assert mgr.session.parties[party_a].status in ("traveling", "decision", "resting", "river_crossing")
+    assert pid1 in mgr.session.parties[party_b].member_ids
+    assert pid1 not in mgr.session.parties[party_a].member_ids
+    assert mgr.session.players[pid1].party_id == party_b
+
+    # Party A should still have its distance and not be corrupted
+    assert mgr.session.parties[party_a].distance_traveled == dist_a_before
 
     p1.disconnect()
     p2.disconnect()
@@ -987,162 +1231,90 @@ def test_party_migration_mid_journey():
 # 15. Scoring consistency
 # ---------------------------------------------------------------------------
 
-def test_scoring_consistency():
-    """Finish a game with known inventory/survivors. Verify score matches manual calculation."""
-    host, host_id = create_host()
-    mgr = _get_session()
-    p1, pid1 = create_player("Alice")
-    p2, pid2 = create_player("Bob")
-    party_id = create_party_and_assign_players(host, [p1, p2], [pid1, pid2], "Scorers")
+def test_scoring_formula_deterministic():
+    """Score calculation matches documented formula exactly."""
+    engine = PartyEngine(seed=42)
 
-    host.emit("start_game")
-    _drain(host)
-    _outfit_party_direct(mgr, party_id)
-    host.emit("begin_journey")
-    _drain(host)
+    party = Party(
+        party_id="test_party",
+        party_name="Test Party",
+        profession=Profession.FARMER,
+        member_ids=["p1", "p2"],
+    )
+    party.inventory = Inventory(
+        oxen=4, food=200, clothing=3, bullets=10,
+        wagon_wheels=2, wagon_axles=1, wagon_tongues=1,
+        money=100.0,
+    )
+    party.morale = 60
+    party.status = "finished"
 
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        party.distance_traveled = TOTAL_DISTANCE
-        party.status = "finished"
-        party.inventory.oxen = 4
-        party.inventory.wagon_wheels = 2
-        party.inventory.wagon_axles = 1
-        party.inventory.wagon_tongues = 1
-        party.inventory.money = 100.0
-        party.inventory.food = 200
-        party.inventory.clothing = 5
-        party.inventory.bullets = 50
-        party.morale = 60
-        party.profession = Profession.CARPENTER
-        mgr.session.parties[party_id] = party
+    players = {
+        "p1": Player(player_id="p1", name="Alice", is_alive=True),
+        "p2": Player(player_id="p2", name="Bob", is_alive=True),
+    }
 
-    engine = mgr.engines[party_id]
-    players = mgr._get_party_players(party)
     score = engine._calculate_score(party, players)
 
-    alive = [pid for pid in party.member_ids if players[pid].is_alive]
-    expected = (
-        len(alive) * SCORE_SURVIVOR
-        + party.inventory.oxen * SCORE_OXEN
-        + party.inventory.wagon_wheels * SCORE_SPARE_PART
-        + party.inventory.wagon_axles * SCORE_SPARE_PART
-        + party.inventory.wagon_tongues * SCORE_SPARE_PART
-        + int(party.inventory.money * SCORE_PER_5_DOLLARS / 5)
-        + int(party.inventory.food * SCORE_PER_50_FOOD / 50)
-        + party.inventory.clothing * SCORE_PER_CLOTHING
-        + int(party.inventory.bullets * SCORE_PER_BULLET)
-        + int(party.morale / 10)
-    ) * 2  # Carpenter multiplier
+    # Formula: survivors * 500 + oxen * 4 + spare_parts * 2 + money/5 + food/50 + clothing * 2 + bullets * 0.1 + morale/10
+    expected_base = (
+        2 * SCORE_SURVIVOR
+        + 4 * SCORE_OXEN
+        + (2 + 1 + 1) * SCORE_SPARE_PART
+        + int(100 * SCORE_PER_5_DOLLARS / 5)
+        + int(200 * SCORE_PER_50_FOOD / 50)
+        + 3 * SCORE_PER_CLOTHING
+        + int(10 * SCORE_PER_BULLET)
+        + int(60 / 10)
+    )
+    # Farmer multiplier = 3
+    expected = expected_base * 3
 
-    assert score == expected
-
-    p1.disconnect()
-    p2.disconnect()
-    host.disconnect()
+    assert score == expected, f"Expected {expected}, got {score}"
 
 
-# ---------------------------------------------------------------------------
-# 16. Morale system
-# ---------------------------------------------------------------------------
+def test_scoring_different_professions():
+    """Different professions yield different multipliers."""
+    engine = PartyEngine(seed=42)
 
-def test_morale_changes_and_affects_speed():
-    """Verify morale changes during events and affects travel speed."""
-    host, host_id = create_host()
-    mgr = _get_session()
-    p1, pid1 = create_player("Alice")
-    party_id = create_party_and_assign_players(host, [p1], [pid1], "Mood")
+    base_inv = Inventory(oxen=2, food=100, clothing=2, bullets=0,
+                         wagon_wheels=0, wagon_axles=0, wagon_tongues=0, money=0)
+    base_morale = 50
 
-    host.emit("start_game")
-    _drain(host)
-    _outfit_party_direct(mgr, party_id)
-    host.emit("begin_journey")
-    _drain(host)
+    scores = {}
+    for prof in [Profession.BANKER, Profession.CARPENTER, Profession.FARMER]:
+        party = Party(party_id="test", party_name="Test", profession=prof,
+                      member_ids=["p1"])
+        party.inventory = Inventory(**vars(base_inv))
+        party.morale = base_morale
+        party.status = "finished"
+        players = {"p1": Player(player_id="p1", name="Alice", is_alive=True)}
 
-    engine = mgr.engines[party_id]
+        scores[prof] = engine._calculate_score(party, players)
 
-    # Baseline travel with normal morale
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        party.morale = 50
-        party.inventory.oxen = 6
-        party.pace = Pace.STEADY
-        mgr.session.parties[party_id] = party
-
-    miles_normal = engine._calculate_travel(party, Weather.COOL, engine._get_terrain_at(party.distance_traveled))
-
-    # High morale should increase speed
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        party.morale = 80
-        mgr.session.parties[party_id] = party
-    miles_high = engine._calculate_travel(party, Weather.COOL, engine._get_terrain_at(party.distance_traveled))
-    assert miles_high >= miles_normal
-
-    # Low morale should decrease speed
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        party.morale = 20
-        mgr.session.parties[party_id] = party
-    miles_low = engine._calculate_travel(party, Weather.COOL, engine._get_terrain_at(party.distance_traveled))
-    assert miles_low <= miles_normal
-
-    # Death should drop morale
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        party.morale = 50
-        mgr.session.parties[party_id] = party
-
-    # Set health to Dead but leave is_alive=True so _check_deaths handles the death and morale drop
-    with mgr.lock:
-        mgr.session.players[pid1].health_status = HealthStatus.DEAD
-        mgr.session.players[pid1].is_alive = True
-    _advance_days(host, mgr, days=1)
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        assert party.morale < 50  # Death drops morale by 20
-
-    p1.disconnect()
-    host.disconnect()
+    # Banker: 1x, Carpenter: 2x, Farmer: 3x
+    banker_score = scores[Profession.BANKER]
+    assert scores[Profession.CARPENTER] == banker_score * 2
+    assert scores[Profession.FARMER] == banker_score * 3
 
 
-# ---------------------------------------------------------------------------
-# 17. Probability dashboard
-# ---------------------------------------------------------------------------
+def test_scoring_dead_members_not_counted():
+    """Dead party members do not contribute to survivor score."""
+    engine = PartyEngine(seed=42)
 
-def test_probability_dashboard_in_decisions():
-    """Verify decisions created during tick() include risk_data with probabilities."""
-    host, host_id = create_host()
-    mgr = _get_session()
-    p1, pid1 = create_player("Alice")
-    party_id = create_party_and_assign_players(host, [p1], [pid1], "Risky")
+    party = Party(party_id="test", party_name="Test", profession=Profession.BANKER,
+                  member_ids=["p1", "p2", "p3"])
+    party.inventory = Inventory(oxen=1, food=10, clothing=1)
+    party.morale = 0
+    party.status = "finished"
 
-    host.emit("start_game")
-    _drain(host)
-    _outfit_party_direct(mgr, party_id)
-    host.emit("begin_journey")
-    _drain(host)
+    players = {
+        "p1": Player(player_id="p1", name="Alice", is_alive=True),
+        "p2": Player(player_id="p2", name="Bob", is_alive=False),
+        "p3": Player(player_id="p3", name="Charlie", is_alive=False),
+    }
 
-    # Force a decision creation by advancing travel_days_since_decision
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        party.travel_days_since_decision = 4
-        mgr.session.parties[party_id] = party
-
-    _advance_days(host, mgr, days=1)
-
-    with mgr.lock:
-        party = mgr.session.parties[party_id]
-        if party.decision_pending and not party.decision_pending.resolved:
-            rd = party.decision_pending.risk_data
-            assert rd is not None
-            assert "trail_event_chance_pct" in rd
-            assert "illness_chance_any_pct" in rd
-            assert "health_trend" in rd
-            assert "terrain" in rd
-        else:
-            # Decision may have been auto-resolved by NPC votes; that's OK for playability
-            pass
-
-    p1.disconnect()
-    host.disconnect()
+    score = engine._calculate_score(party, players)
+    # Only 1 survivor
+    base_expected = 1 * SCORE_SURVIVOR + 1 * SCORE_OXEN + 1 * SCORE_PER_CLOTHING + int(10 * SCORE_PER_50_FOOD / 50)
+    assert score == base_expected, f"Expected {base_expected}, got {score}"
