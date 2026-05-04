@@ -284,6 +284,7 @@ class SessionManager:
             self.state_version += 1
             self.session.tick_count += 1
             dirty_party_ids: set[str] = set()
+            all_events: list = []
 
             # 1. Resolve pending decisions with defaults
             for party in self.session.parties.values():
@@ -306,7 +307,6 @@ class SessionManager:
                             dirty_party_ids.add(party.party_id)
 
             # 2. Tick each active party
-            all_events = []
             for party in self.session.parties.values():
                 if party.status in ("finished", "dead", "hunting", "outfitting"):
                     continue
